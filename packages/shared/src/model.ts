@@ -4,9 +4,11 @@ import {
   type ClaudeCodeEffort,
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type CopilotModelOptions,
   type ModelCapabilities,
   type ModelSelection,
   type ProviderKind,
+  type ProviderModelOptions,
 } from "@t3tools/contracts";
 
 export interface SelectableModelOption {
@@ -117,6 +119,17 @@ export function normalizeClaudeModelOptionsWithCapabilities(
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 
+export function normalizeCopilotModelOptionsWithCapabilities(
+  caps: ModelCapabilities,
+  modelOptions: CopilotModelOptions | null | undefined,
+): CopilotModelOptions | undefined {
+  const reasoningEffort = resolveEffort(caps, modelOptions?.reasoningEffort);
+  const nextOptions: CopilotModelOptions = reasoningEffort
+    ? { reasoningEffort: reasoningEffort as CopilotModelOptions["reasoningEffort"] }
+    : {};
+  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
   return typeof text === "string" && /\bultrathink\b/i.test(text);
 }
@@ -187,6 +200,27 @@ export function resolveModelSlugForProvider(
   model: string | null | undefined,
 ): string {
   return resolveModelSlug(model, provider);
+}
+
+export function makeModelSelection(
+  provider: ProviderKind,
+  model: string,
+  options?: ProviderModelOptions[ProviderKind],
+): ModelSelection {
+  switch (provider) {
+    case "codex":
+      return options
+        ? { provider, model, options: options as CodexModelOptions }
+        : { provider, model };
+    case "copilot":
+      return options
+        ? { provider, model, options: options as CopilotModelOptions }
+        : { provider, model };
+    case "claudeAgent":
+      return options
+        ? { provider, model, options: options as ClaudeModelOptions }
+        : { provider, model };
+  }
 }
 
 /** Trim a string, returning null for empty/missing values. */

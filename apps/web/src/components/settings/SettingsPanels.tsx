@@ -19,7 +19,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import { makeModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
 import {
@@ -104,6 +104,12 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     homePathKey: "codexHomePath",
     homePlaceholder: "CODEX_HOME",
     homeDescription: "Optional custom Codex home and config directory.",
+  },
+  {
+    provider: "copilot",
+    title: "GitHub Copilot",
+    binaryPlaceholder: "Copilot binary path",
+    binaryDescription: "Path to the GitHub Copilot CLI binary",
   },
   {
     provider: "claudeAgent",
@@ -526,6 +532,14 @@ export function GeneralSettingsPanel() {
       settings.providers.codex.homePath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.homePath ||
       settings.providers.codex.customModels.length > 0,
     ),
+    copilot: Boolean(
+      settings.providers.copilot.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.copilot.binaryPath ||
+      settings.providers.copilot.useWsl !== DEFAULT_UNIFIED_SETTINGS.providers.copilot.useWsl ||
+      settings.providers.copilot.wslDistro !==
+        DEFAULT_UNIFIED_SETTINGS.providers.copilot.wslDistro ||
+      settings.providers.copilot.customModels.length > 0,
+    ),
     claudeAgent: Boolean(
       settings.providers.claudeAgent.binaryPath !==
         DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
@@ -536,6 +550,7 @@ export function GeneralSettingsPanel() {
     Record<ProviderKind, string>
   >({
     codex: "",
+    copilot: "",
     claudeAgent: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
@@ -718,6 +733,14 @@ export function GeneralSettingsPanel() {
       homePlaceholder: providerSettings.homePlaceholder,
       homeDescription: providerSettings.homeDescription,
       binaryPathValue: providerConfig.binaryPath,
+      copilotUseWsl:
+        providerSettings.provider === "copilot" && "useWsl" in providerConfig
+          ? providerConfig.useWsl === true
+          : undefined,
+      copilotWslDistro:
+        providerSettings.provider === "copilot" && "wslDistro" in providerConfig
+          ? providerConfig.wslDistro
+          : undefined,
       isDirty: !Equal.equals(providerConfig, defaultProviderConfig),
       liveProvider,
       models,
@@ -1013,11 +1036,11 @@ export function GeneralSettingsPanel() {
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
-                          provider: textGenProvider,
-                          model: textGenModel,
-                          ...(nextOptions ? { options: nextOptions } : {}),
-                        },
+                        textGenerationModelSelection: makeModelSelection(
+                          textGenProvider,
+                          textGenModel,
+                          nextOptions,
+                        ),
                       },
                       serverProviders,
                     ),
@@ -1195,6 +1218,70 @@ export function GeneralSettingsPanel() {
                         </span>
                       </label>
                     </div>
+
+                    {providerCard.provider === "copilot" ? (
+                      <>
+                        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0 space-y-1">
+                              <span className="text-xs font-medium text-foreground">
+                                Run Copilot in WSL
+                              </span>
+                              <p className="text-xs text-muted-foreground">
+                                On Windows, launch GitHub Copilot CLI through <code>wsl.exe</code>.
+                                Use this when Copilot is installed inside WSL. WSL workspaces under{" "}
+                                <code>\\wsl$\\&lt;distro&gt;\\...</code> already run repo terminals
+                                and git commands in WSL automatically.
+                              </p>
+                            </div>
+                            <Switch
+                              checked={providerCard.copilotUseWsl === true}
+                              onCheckedChange={(checked) =>
+                                updateSettings({
+                                  providers: {
+                                    ...settings.providers,
+                                    copilot: {
+                                      ...settings.providers.copilot,
+                                      useWsl: Boolean(checked),
+                                    },
+                                  },
+                                })
+                              }
+                              aria-label="Run GitHub Copilot in WSL"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                          <label htmlFor="provider-install-copilot-wsl-distro" className="block">
+                            <span className="text-xs font-medium text-foreground">WSL distro</span>
+                            <Input
+                              id="provider-install-copilot-wsl-distro"
+                              className="mt-1.5"
+                              value={providerCard.copilotWslDistro ?? ""}
+                              onChange={(event) =>
+                                updateSettings({
+                                  providers: {
+                                    ...settings.providers,
+                                    copilot: {
+                                      ...settings.providers.copilot,
+                                      wslDistro: event.target.value,
+                                    },
+                                  },
+                                })
+                              }
+                              placeholder="Leave blank to use the default WSL distro"
+                              spellCheck={false}
+                            />
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              Optional. When blank, provider checks and launches use the default WSL
+                              distro unless the workspace path already points at a specific{" "}
+                              <code>\\wsl$</code> distro.
+                            </span>
+                          </label>
+                        </div>
+                      </>
+                    ) : null}
 
                     {providerCard.homePathKey ? (
                       <div className="border-t border-border/60 px-4 py-3 sm:px-5">

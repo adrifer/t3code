@@ -4,15 +4,25 @@ import type { ProviderKind } from "./orchestration";
 
 export const CODEX_REASONING_EFFORT_OPTIONS = ["xhigh", "high", "medium", "low"] as const;
 export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORT_OPTIONS)[number];
+export const COPILOT_REASONING_EFFORT_OPTIONS = CODEX_REASONING_EFFORT_OPTIONS;
+export type CopilotReasoningEffort = (typeof COPILOT_REASONING_EFFORT_OPTIONS)[number];
 export const CLAUDE_CODE_EFFORT_OPTIONS = ["low", "medium", "high", "max", "ultrathink"] as const;
 export type ClaudeCodeEffort = (typeof CLAUDE_CODE_EFFORT_OPTIONS)[number];
-export type ProviderReasoningEffort = CodexReasoningEffort | ClaudeCodeEffort;
+export type ProviderReasoningEffort =
+  | CodexReasoningEffort
+  | CopilotReasoningEffort
+  | ClaudeCodeEffort;
 
 export const CodexModelOptions = Schema.Struct({
   reasoningEffort: Schema.optional(Schema.Literals(CODEX_REASONING_EFFORT_OPTIONS)),
   fastMode: Schema.optional(Schema.Boolean),
 });
 export type CodexModelOptions = typeof CodexModelOptions.Type;
+
+export const CopilotModelOptions = Schema.Struct({
+  reasoningEffort: Schema.optional(Schema.Literals(COPILOT_REASONING_EFFORT_OPTIONS)),
+});
+export type CopilotModelOptions = typeof CopilotModelOptions.Type;
 
 export const ClaudeModelOptions = Schema.Struct({
   thinking: Schema.optional(Schema.Boolean),
@@ -24,6 +34,7 @@ export type ClaudeModelOptions = typeof ClaudeModelOptions.Type;
 
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
+  copilot: Schema.optional(CopilotModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
@@ -53,6 +64,7 @@ export type ModelCapabilities = typeof ModelCapabilities.Type;
 
 export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4",
+  copilot: "gpt-5.4",
   claudeAgent: "claude-sonnet-4-6",
 };
 
@@ -61,6 +73,7 @@ export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 /** Per-provider text generation model defaults. */
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4-mini",
+  copilot: "gpt-5.4-mini",
   claudeAgent: "claude-haiku-4-5",
 };
 
@@ -71,6 +84,23 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "gpt-5.3": "gpt-5.3-codex",
     "5.3-spark": "gpt-5.3-codex-spark",
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
+  },
+  copilot: {
+    "5.4": "gpt-5.4",
+    "5.4-mini": "gpt-5.4-mini",
+    "gpt-5.4-mini": "gpt-5.4-mini",
+    "5.3": "gpt-5.3-codex",
+    "gpt-5.3": "gpt-5.3-codex",
+    "5.3-spark": "gpt-5.3-codex-spark",
+    "gpt-5.3-spark": "gpt-5.3-codex-spark",
+    sonnet: "claude-sonnet-4-6",
+    "sonnet-4.6": "claude-sonnet-4-6",
+    "claude-sonnet-4.6": "claude-sonnet-4-6",
+    "claude-sonnet-4-6-20251117": "claude-sonnet-4-6",
+    opus: "claude-opus-4-6",
+    "opus-4.6": "claude-opus-4-6",
+    "claude-opus-4.6": "claude-opus-4-6",
+    "claude-opus-4-6-20251117": "claude-opus-4-6",
   },
   claudeAgent: {
     opus: "claude-opus-4-6",
@@ -92,5 +122,6 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
 
 export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   codex: "Codex",
+  copilot: "GitHub Copilot",
   claudeAgent: "Claude",
 };

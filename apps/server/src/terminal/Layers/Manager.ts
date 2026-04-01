@@ -24,6 +24,7 @@ import {
 
 import { ServerConfig } from "../../config";
 import { runProcess } from "../../processRunner";
+import { resolveWslExecutionTarget } from "../../wsl";
 import {
   TerminalCwdError,
   TerminalHistoryError,
@@ -207,6 +208,23 @@ function formatShellCandidate(candidate: ShellCandidate): string {
   return `${candidate.shell} ${candidate.args.join(" ")}`;
 }
 
+function makeWslShellCandidate(
+  target: NonNullable<ReturnType<typeof resolveWslExecutionTarget>>,
+  shell: string,
+  args?: ReadonlyArray<string>,
+): ShellCandidate {
+  return {
+    shell: "wsl.exe",
+    args: [
+      ...(target.distro ? ["-d", target.distro] : []),
+      ...(target.linuxCwd ? ["--cd", target.linuxCwd] : []),
+      "--exec",
+      shell,
+      ...(args ?? []),
+    ],
+  };
+}
+
 function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellCandidate[] {
   const seen = new Set<string>();
   const ordered: ShellCandidate[] = [];
@@ -220,7 +238,19 @@ function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellC
   return ordered;
 }
 
-function resolveShellCandidates(shellResolver: () => string): ShellCandidate[] {
+function resolveShellCandidates(shellResolver: () => string, cwd?: string): ShellCandidate[] {
+  const wslTarget = resolveWslExecutionTarget({ cwd });
+  if (process.platform === "win32" && wslTarget) {
+    return uniqueShellCandidates([
+      makeWslShellCandidate(wslTarget, "/bin/zsh", ["-o", "nopromptsp"]),
+      makeWslShellCandidate(wslTarget, "/bin/bash"),
+      makeWslShellCandidate(wslTarget, "/bin/sh"),
+      makeWslShellCandidate(wslTarget, "zsh", ["-o", "nopromptsp"]),
+      makeWslShellCandidate(wslTarget, "bash"),
+      makeWslShellCandidate(wslTarget, "sh"),
+    ]);
+  }
+
   const requested = shellCandidateFromCommand(normalizeShellCommand(shellResolver()));
 
   if (process.platform === "win32") {
@@ -1315,7 +1345,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
       const startResult = yield* Effect.result(
         Effect.gen(function* () {
-          const shellCandidates = resolveShellCandidates(shellResolver);
+          const shellCandidates = resolveShellCandidates(shellResolver, session.cwd);
           const terminalEnv = createTerminalSpawnEnv(process.env, session.runtimeEnv);
           const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session);
           ptyProcess = spawnResult.process;

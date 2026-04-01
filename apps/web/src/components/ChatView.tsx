@@ -20,7 +20,11 @@ import {
   RuntimeMode,
   TerminalOpenInput,
 } from "@t3tools/contracts";
-import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  applyClaudePromptEffortPrefix,
+  makeModelSelection,
+  normalizeModelSlug,
+} from "@t3tools/shared/model";
 import { truncate } from "@t3tools/shared/String";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -824,11 +828,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
   const selectedModelSelection = useMemo<ModelSelection>(
-    () => ({
-      provider: selectedProvider,
-      model: selectedModel,
-      ...(selectedModelOptionsForDispatch ? { options: selectedModelOptionsForDispatch } : {}),
-    }),
+    () => makeModelSelection(selectedProvider, selectedModel, selectedModelOptionsForDispatch),
     [selectedModel, selectedModelOptionsForDispatch, selectedProvider],
   );
   const selectedModelForPicker = selectedModel;
@@ -1207,6 +1207,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const modelOptionsByProvider = useMemo(
     () => ({
       codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
+      copilot: providerStatuses.find((provider) => provider.provider === "copilot")?.models ?? [],
       claudeAgent:
         providerStatuses.find((provider) => provider.provider === "claudeAgent")?.models ?? [],
     }),
@@ -2826,14 +2827,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
       }
       const title = truncate(titleSeed);
-      const threadCreateModelSelection: ModelSelection = {
-        provider: selectedProvider,
-        model:
-          selectedModel ||
+      const threadCreateModelSelection: ModelSelection = makeModelSelection(
+        selectedProvider,
+        selectedModel ||
           activeProject.defaultModelSelection?.model ||
-          DEFAULT_MODEL_BY_PROVIDER.codex,
-        ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
-      };
+          DEFAULT_MODEL_BY_PROVIDER[selectedProvider],
+        selectedModelSelection.options,
+      );
 
       if (isLocalDraftThread) {
         await api.orchestration.dispatchCommand({

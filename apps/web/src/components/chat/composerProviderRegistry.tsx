@@ -11,6 +11,7 @@ import { TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
 import {
   normalizeClaudeModelOptionsWithCapabilities,
   normalizeCodexModelOptionsWithCapabilities,
+  normalizeCopilotModelOptionsWithCapabilities,
 } from "@t3tools/shared/model";
 
 export type ComposerProviderStateInput = {
@@ -69,10 +70,25 @@ function getProviderStateFromCapabilities(
   const promptEffort = resolveEffort(caps, rawEffort) ?? null;
 
   // Normalize options for dispatch
-  const normalizedOptions =
-    provider === "codex"
-      ? normalizeCodexModelOptionsWithCapabilities(caps, providerOptions)
-      : normalizeClaudeModelOptionsWithCapabilities(caps, providerOptions);
+  const normalizedOptions = (() => {
+    switch (provider) {
+      case "codex":
+        return normalizeCodexModelOptionsWithCapabilities(
+          caps,
+          providerOptions as ProviderModelOptions["codex"],
+        );
+      case "copilot":
+        return normalizeCopilotModelOptionsWithCapabilities(
+          caps,
+          providerOptions as ProviderModelOptions["copilot"],
+        );
+      case "claudeAgent":
+        return normalizeClaudeModelOptionsWithCapabilities(
+          caps,
+          providerOptions as ProviderModelOptions["claudeAgent"],
+        );
+    }
+  })();
 
   // Ultrathink styling (driven by capabilities data, not provider identity)
   const ultrathinkActive =
@@ -114,6 +130,38 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
     renderTraitsPicker: ({ threadId, model, models, modelOptions, prompt, onPromptChange }) => (
       <TraitsPicker
         provider="codex"
+        models={models}
+        threadId={threadId}
+        model={model}
+        modelOptions={modelOptions}
+        prompt={prompt}
+        onPromptChange={onPromptChange}
+      />
+    ),
+  },
+  copilot: {
+    getState: (input) => getProviderStateFromCapabilities(input),
+    renderTraitsMenuContent: ({
+      threadId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+    }) => (
+      <TraitsMenuContent
+        provider="copilot"
+        models={models}
+        threadId={threadId}
+        model={model}
+        modelOptions={modelOptions}
+        prompt={prompt}
+        onPromptChange={onPromptChange}
+      />
+    ),
+    renderTraitsPicker: ({ threadId, model, models, modelOptions, prompt, onPromptChange }) => (
+      <TraitsPicker
+        provider="copilot"
         models={models}
         threadId={threadId}
         model={model}
