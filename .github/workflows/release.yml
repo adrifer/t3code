@@ -225,7 +225,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [preflight, build, publish_cli]
+    needs: [preflight, build]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
