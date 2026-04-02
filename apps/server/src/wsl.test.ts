@@ -136,4 +136,35 @@ describe("wsl helpers", () => {
       shell: false,
     });
   });
+
+  it("can bootstrap WSL shell profiles for git commands too", () => {
+    setPlatform("win32");
+    expect(
+      resolveCommandExecution({
+        command: "git",
+        args: ["status", "--short"],
+        cwd: String.raw`\\wsl$\Ubuntu\home\dev\repo`,
+        wsl: {
+          shellProfile: true,
+        },
+      }),
+    ).toMatchObject({
+      command: "wsl.exe",
+      args: [
+        "-d",
+        "Ubuntu",
+        "--cd",
+        "/home/dev/repo",
+        "--exec",
+        "/bin/sh",
+        "-lc",
+        expect.any(String),
+        "sh",
+        "git",
+        "status",
+        "--short",
+      ],
+      shell: false,
+    });
+  });
 });

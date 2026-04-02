@@ -595,6 +595,9 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
             ...input.env,
             ...trace2Monitor.env,
           },
+          wsl: {
+            shellProfile: true,
+          },
         });
         const child = yield* commandSpawner
           .spawn(
