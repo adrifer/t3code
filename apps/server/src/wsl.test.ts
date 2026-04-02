@@ -76,4 +76,34 @@ describe("wsl helpers", () => {
       ),
     ).toBe("/mnt/c/Users/dev/.t3/attachments/image.png");
   });
+
+  it("can bootstrap a WSL shell profile before resolving commands", () => {
+    setPlatform("win32");
+    expect(
+      resolveCommandExecution({
+        command: "copilot",
+        args: ["--version"],
+        cwd: String.raw`\\wsl$\Ubuntu\home\dev\repo`,
+        wsl: {
+          shellProfile: true,
+        },
+      }),
+    ).toMatchObject({
+      command: "wsl.exe",
+      args: [
+        "-d",
+        "Ubuntu",
+        "--cd",
+        "/home/dev/repo",
+        "--exec",
+        "/bin/bash",
+        "-lc",
+        expect.stringContaining(".bashrc"),
+        "bash",
+        "copilot",
+        "--version",
+      ],
+      shell: false,
+    });
+  });
 });

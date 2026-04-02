@@ -127,6 +127,7 @@ function copilotVersionCommand(settings: CopilotSettings) {
     wsl: {
       enabled: settings.useWsl,
       distro: settings.wslDistro,
+      shellProfile: true,
     },
   });
 

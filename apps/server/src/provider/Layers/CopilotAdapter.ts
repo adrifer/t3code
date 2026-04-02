@@ -678,6 +678,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         wsl: {
           enabled: settings.useWsl,
           distro: settings.wslDistro,
+          shellProfile: true,
         },
       });
 

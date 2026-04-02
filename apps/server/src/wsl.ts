@@ -13,6 +13,7 @@ export interface CommandExecutionInput {
     | {
         readonly enabled?: boolean | undefined;
         readonly distro?: string | undefined;
+        readonly shellProfile?: boolean | undefined;
       }
     | undefined;
 }
@@ -33,6 +34,13 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 
 function toPosixPath(value: string): string {
   return value.replaceAll("\\", "/");
+}
+
+const WSL_PROFILE_BOOTSTRAP =
+  'for file in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.bashrc"; do if [ -f "$file" ]; then . "$file" >/dev/null 2>&1 || true; fi; done; exec "$@"';
+
+function shouldUseWslShellProfile(input: CommandExecutionInput): boolean {
+  return input.wsl?.shellProfile === true && !/[\\/]/.test(input.command);
 }
 
 export function parseWslUncPath(
@@ -141,8 +149,9 @@ export function resolveCommandExecution(input: CommandExecutionInput): ResolvedC
       ...(wslTarget.distro ? ["-d", wslTarget.distro] : []),
       ...(wslTarget.linuxCwd ? ["--cd", wslTarget.linuxCwd] : []),
       "--exec",
-      input.command,
-      ...input.args,
+      ...(shouldUseWslShellProfile(input)
+        ? ["/bin/bash", "-lc", WSL_PROFILE_BOOTSTRAP, "bash", input.command, ...input.args]
+        : [input.command, ...input.args]),
     ],
     env: input.env,
     shell: false,

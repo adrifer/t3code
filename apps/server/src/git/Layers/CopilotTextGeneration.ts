@@ -210,6 +210,7 @@ ${schemaJson}
       wsl: {
         enabled: copilotSettings?.useWsl,
         distro: copilotSettings?.wslDistro,
+        shellProfile: true,
       },
     });
     const command = ChildProcess.make(execution.command, [...execution.args], {
