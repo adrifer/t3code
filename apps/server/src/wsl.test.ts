@@ -96,10 +96,40 @@ describe("wsl helpers", () => {
         "--cd",
         "/home/dev/repo",
         "--exec",
-        "/bin/bash",
-        "-ilc",
-        'exec "$@"',
-        "bash",
+        "/bin/sh",
+        "-lc",
+        expect.stringContaining(".bashrc"),
+        "sh",
+        "copilot",
+        "--version",
+      ],
+      shell: false,
+    });
+  });
+
+  it("includes zsh startup files in the WSL shell bootstrap", () => {
+    setPlatform("win32");
+    expect(
+      resolveCommandExecution({
+        command: "copilot",
+        args: ["--version"],
+        cwd: String.raw`\\wsl$\Ubuntu\home\dev\repo`,
+        wsl: {
+          shellProfile: true,
+        },
+      }),
+    ).toMatchObject({
+      command: "wsl.exe",
+      args: [
+        "-d",
+        "Ubuntu",
+        "--cd",
+        "/home/dev/repo",
+        "--exec",
+        "/bin/sh",
+        "-lc",
+        expect.stringContaining(".zshrc"),
+        "sh",
         "copilot",
         "--version",
       ],
