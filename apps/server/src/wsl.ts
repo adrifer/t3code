@@ -36,8 +36,7 @@ function toPosixPath(value: string): string {
   return value.replaceAll("\\", "/");
 }
 
-const WSL_PROFILE_BOOTSTRAP =
-  'for file in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.bashrc"; do if [ -f "$file" ]; then . "$file" >/dev/null 2>&1 || true; fi; done; exec "$@"';
+const WSL_PROFILE_BOOTSTRAP = 'exec "$@"';
 
 function shouldUseWslShellProfile(input: CommandExecutionInput): boolean {
   return input.wsl?.shellProfile === true && !/[\\/]/.test(input.command);
@@ -150,7 +149,7 @@ export function resolveCommandExecution(input: CommandExecutionInput): ResolvedC
       ...(wslTarget.linuxCwd ? ["--cd", wslTarget.linuxCwd] : []),
       "--exec",
       ...(shouldUseWslShellProfile(input)
-        ? ["/bin/bash", "-lc", WSL_PROFILE_BOOTSTRAP, "bash", input.command, ...input.args]
+        ? ["/bin/bash", "-ilc", WSL_PROFILE_BOOTSTRAP, "bash", input.command, ...input.args]
         : [input.command, ...input.args]),
     ],
     env: input.env,
