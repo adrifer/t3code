@@ -17,27 +17,22 @@ Use this skill when asked to cut the next release tag for this repository.
 
 ## Commands
 
-Preview the next stable tag:
+Create and push the next stable tag to `origin`:
 
 ```bash
-bun run release:tag -- --fetch-tags
-```
-
-Create and push the new tag to `origin`:
-
-```bash
-bun run release:tag -- --fetch-tags --create --push
+bun run release:tag
 ```
 
 Use a different remote if needed:
 
 ```bash
-bun run release:tag -- --fetch-tags --create --push --remote upstream
+bun run release:tag -- --remote upstream
 ```
 
 ## Notes
 
 - The helper script is `scripts/release-next-version.ts`.
+- The script fetches tags before calculating the next release.
 - The script creates an **annotated** tag on the current `HEAD` commit.
 - The script pushes only the newly created tag, not every local tag.
 - Pushing a `v*.*.*` tag triggers `.github/workflows/release.yml`.

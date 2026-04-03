@@ -75,13 +75,12 @@ Use this first to validate the release pipeline.
 
 If you only need to cut the next stable release tag from the current `HEAD` commit, use the helper script:
 
-1. Preview the next tag based on the latest stable `vX.Y.Z` tag:
-   - `bun run release:tag -- --fetch-tags`
-2. Create and push the new tag to `origin`:
-   - `bun run release:tag -- --fetch-tags --create --push`
+1. Create and push the next stable tag to `origin`:
+   - `bun run release:tag`
 
 Notes:
 
+- The helper fetches tags before calculating the next version.
 - Prerelease tags such as `v0.0.0-test.1` are ignored when selecting the base version.
 - The helper creates an annotated tag on the current `HEAD` commit.
 - The helper pushes only the new tag instead of every local tag.

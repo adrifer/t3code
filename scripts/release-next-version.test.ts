@@ -69,7 +69,7 @@ describe("release-next-version", () => {
 
       const output = execFileSync(
         process.execPath,
-        [resolve(repoRoot, "scripts/release-next-version.ts"), "--create", "--push"],
+        [resolve(repoRoot, "scripts/release-next-version.ts")],
         {
           cwd: repoDir,
           encoding: "utf8",

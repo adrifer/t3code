@@ -14,9 +14,6 @@ export interface StableReleaseTag {
 interface ReleaseTagOptions {
   readonly rootDir: string | undefined;
   readonly remote: string;
-  readonly fetchTags: boolean;
-  readonly create: boolean;
-  readonly push: boolean;
 }
 
 export function parseStableReleaseTag(tag: string): StableReleaseTag | null {
@@ -106,28 +103,10 @@ export function pushReleaseTag(rootDir: string, remote: string, tag: string): vo
 function parseArgs(argv: ReadonlyArray<string>): ReleaseTagOptions {
   let rootDir: string | undefined;
   let remote = "origin";
-  let fetchTags = false;
-  let create = false;
-  let push = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === undefined) {
-      continue;
-    }
-
-    if (argument === "--create") {
-      create = true;
-      continue;
-    }
-
-    if (argument === "--push") {
-      push = true;
-      continue;
-    }
-
-    if (argument === "--fetch-tags") {
-      fetchTags = true;
       continue;
     }
 
@@ -150,16 +129,13 @@ function parseArgs(argv: ReadonlyArray<string>): ReleaseTagOptions {
     }
 
     throw new Error(
-      "Usage: node scripts/release-next-version.ts [--root <path>] [--remote <name>] [--fetch-tags] [--create] [--push]",
+      "Usage: node scripts/release-next-version.ts [--root <path>] [--remote <name>]",
     );
   }
 
   return {
     rootDir,
     remote,
-    fetchTags,
-    create,
-    push,
   };
 }
 
@@ -170,9 +146,7 @@ export function resolveNextReleaseTag(options: ReleaseTagOptions): {
 } {
   const rootDir = options.rootDir ?? process.cwd();
 
-  if (options.fetchTags) {
-    fetchGitTags(rootDir, options.remote);
-  }
+  fetchGitTags(rootDir, options.remote);
 
   const latestTag = findLatestStableReleaseTag(listGitTags(rootDir));
   const nextTag = deriveNextReleaseTag(latestTag);
@@ -191,20 +165,13 @@ const isMain =
 if (isMain) {
   const options = parseArgs(process.argv.slice(2));
   const rootDir = options.rootDir ?? process.cwd();
-  const shouldCreateTag = options.create || options.push;
   const { latestTag, nextTag, headCommit } = resolveNextReleaseTag(options);
 
   console.log(`Latest stable release tag: ${latestTag?.tag ?? "none"}`);
   console.log(`Next stable release tag: ${nextTag}`);
   console.log(`Current HEAD commit: ${headCommit}`);
-
-  if (shouldCreateTag) {
-    createAnnotatedReleaseTag(rootDir, nextTag);
-    console.log(`Created annotated tag ${nextTag}.`);
-  }
-
-  if (options.push) {
-    pushReleaseTag(rootDir, options.remote, nextTag);
-    console.log(`Pushed ${nextTag} to ${options.remote}.`);
-  }
+  createAnnotatedReleaseTag(rootDir, nextTag);
+  console.log(`Created annotated tag ${nextTag}.`);
+  pushReleaseTag(rootDir, options.remote, nextTag);
+  console.log(`Pushed ${nextTag} to ${options.remote}.`);
 }
