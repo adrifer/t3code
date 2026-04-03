@@ -34,6 +34,7 @@ import { checkClaudeProviderStatus, parseClaudeAuthStatusFromOutput } from "./Cl
 import { haveProvidersChanged, ProviderRegistryLive } from "./ProviderRegistry";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings";
 import { ProviderRegistry } from "../Services/ProviderRegistry";
+import { PtyAdapter, PtySpawnError } from "../../terminal/Services/PTY";
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -80,6 +81,16 @@ function mockCommandSpawnerLayer(
     }),
   );
 }
+
+const testPtyLayer = Layer.succeed(PtyAdapter, {
+  spawn: () =>
+    Effect.fail(
+      new PtySpawnError({
+        adapter: "test",
+        message: "PTY probing is unavailable in this test harness.",
+      }),
+    ),
+});
 
 function failingSpawnerLayer(description: string) {
   return Layer.succeed(
@@ -542,6 +553,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
           const providerRegistryLayer = ProviderRegistryLive.pipe(
             Layer.provideMerge(Layer.succeed(ServerSettingsService, serverSettings)),
+            Layer.provideMerge(testPtyLayer),
             Layer.provideMerge(
               mockCommandSpawnerLayer((command, args) => {
                 const joined = args.join(" ");
@@ -867,7 +879,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           yield* withTempEnv("COPILOT_GITHUB_TOKEN", undefined);
           yield* withTempEnv("GH_TOKEN", undefined);
           yield* withTempEnv("GITHUB_TOKEN", undefined);
-          const status = yield* checkCopilotProviderStatus;
+          const status = yield* checkCopilotProviderStatus();
           assert.strictEqual(status.provider, "copilot");
           assert.strictEqual(status.status, "ready");
           assert.strictEqual(status.installed, true);
@@ -893,7 +905,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           yield* withTempEnv("COPILOT_GITHUB_TOKEN", "github_pat_test");
           yield* withTempEnv("GH_TOKEN", undefined);
           yield* withTempEnv("GITHUB_TOKEN", undefined);
-          const status = yield* checkCopilotProviderStatus;
+          const status = yield* checkCopilotProviderStatus();
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "token");
           assert.strictEqual(status.auth.label, "COPILOT_GITHUB_TOKEN");
@@ -915,7 +927,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           yield* withTempEnv("COPILOT_GITHUB_TOKEN", undefined);
           yield* withTempEnv("GH_TOKEN", undefined);
           yield* withTempEnv("GITHUB_TOKEN", undefined);
-          const status = yield* checkCopilotProviderStatus;
+          const status = yield* checkCopilotProviderStatus();
           assert.strictEqual(status.provider, "copilot");
           assert.strictEqual(status.status, "ready");
           assert.strictEqual(status.installed, true);
@@ -928,6 +940,46 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
                 return { stdout: "GitHub Copilot CLI 1.0.17.\n", stderr: "", code: 0 };
               if (joined === "auth status")
                 return { stdout: "", stderr: "not logged in\n", code: 1 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("uses the probed Copilot model catalog when available", () =>
+        Effect.gen(function* () {
+          yield* withTempEnv("COPILOT_PROVIDER_BASE_URL", undefined);
+          yield* withTempEnv("COPILOT_GITHUB_TOKEN", "github_pat_test");
+          const status = yield* checkCopilotProviderStatus(() =>
+            Effect.succeed([
+              {
+                slug: "claude-opus-4-6-1m",
+                name: "Claude Opus 4.6 (1M Context)",
+                premiumRequestMultiplier: "6x",
+              },
+              {
+                slug: "gpt-5-mini",
+                name: "GPT-5 mini",
+                premiumRequestMultiplier: "0x",
+              },
+            ]),
+          );
+          assert.deepStrictEqual(
+            status.models.map((model) => ({
+              slug: model.slug,
+              premiumRequestMultiplier: model.premiumRequestMultiplier,
+            })),
+            [
+              { slug: "claude-opus-4-6-1m", premiumRequestMultiplier: "6x" },
+              { slug: "gpt-5-mini", premiumRequestMultiplier: "0x" },
+            ],
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version")
+                return { stdout: "GitHub Copilot CLI 1.0.17.\n", stderr: "", code: 0 };
               throw new Error(`Unexpected args: ${joined}`);
             }),
           ),

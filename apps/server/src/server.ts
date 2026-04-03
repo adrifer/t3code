@@ -194,7 +194,7 @@ const RuntimeServicesLive = Layer.empty.pipe(
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
-  Layer.provideMerge(ProviderRegistryLive),
+  Layer.provideMerge(ProviderRegistryLive.pipe(Layer.provide(PtyAdapterLive))),
   Layer.provideMerge(ServerSettingsLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),

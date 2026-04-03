@@ -1383,6 +1383,9 @@ export function GeneralSettingsPanel() {
                           ) {
                             capLabels.push("Reasoning");
                           }
+                          if (model.premiumRequestMultiplier) {
+                            capLabels.push(`Premium requests: ${model.premiumRequestMultiplier}`);
+                          }
                           const hasDetails = capLabels.length > 0 || model.name !== model.slug;
 
                           return (
@@ -1393,6 +1396,11 @@ export function GeneralSettingsPanel() {
                               <span className="min-w-0 truncate text-xs text-foreground/90">
                                 {model.name}
                               </span>
+                              {model.premiumRequestMultiplier ? (
+                                <span className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                  {model.premiumRequestMultiplier}
+                                </span>
+                              ) : null}
                               {hasDetails ? (
                                 <Tooltip>
                                   <TooltipTrigger

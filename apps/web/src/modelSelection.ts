@@ -32,6 +32,7 @@ export interface AppModelOption {
   slug: string;
   name: string;
   isCustom: boolean;
+  premiumRequestMultiplier?: string | undefined;
 }
 
 const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConfig> = {
@@ -95,13 +96,17 @@ export function getAppModelOptions(
   provider: ProviderKind,
   selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = getProviderModels(providers, provider).map(
-    ({ slug, name, isCustom }) => ({
-      slug,
-      name,
-      isCustom,
-    }),
-  );
+  const options: AppModelOption[] = getProviderModels(providers, provider).map((model) => {
+    const option: AppModelOption = {
+      slug: model.slug,
+      name: model.name,
+      isCustom: model.isCustom,
+    };
+    if (model.premiumRequestMultiplier) {
+      option.premiumRequestMultiplier = model.premiumRequestMultiplier;
+    }
+    return option;
+  });
   const seen = new Set(options.map((option) => option.slug));
   const trimmedSelectedModel = selectedModel?.trim().toLowerCase();
   const builtInModelSlugs = new Set(
@@ -162,7 +167,10 @@ export function getCustomModelOptionsByProvider(
   providers: ReadonlyArray<ServerProvider>,
   selectedProvider?: ProviderKind | null,
   selectedModel?: string | null,
-): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
+): Record<
+  ProviderKind,
+  ReadonlyArray<{ slug: string; name: string; premiumRequestMultiplier?: string | undefined }>
+> {
   return {
     codex: getAppModelOptions(
       settings,

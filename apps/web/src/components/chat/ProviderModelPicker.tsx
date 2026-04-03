@@ -1,4 +1,8 @@
-import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
+import {
+  type ProviderKind,
+  type ServerProvider,
+  type ServerProviderModel,
+} from "@t3tools/contracts";
 import { resolveSelectableModel } from "@t3tools/shared/model";
 import { memo, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
@@ -56,7 +60,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   model: string;
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
-  modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
+  modelOptionsByProvider: Record<
+    ProviderKind,
+    ReadonlyArray<Pick<ServerProviderModel, "slug" | "name" | "premiumRequestMultiplier">>
+  >;
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
@@ -140,7 +147,14 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                   value={modelOption.slug}
                   onClick={() => setIsMenuOpen(false)}
                 >
-                  {modelOption.name}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 truncate">{modelOption.name}</span>
+                    {modelOption.premiumRequestMultiplier ? (
+                      <span className="shrink-0 text-[10px] text-muted-foreground/80">
+                        {modelOption.premiumRequestMultiplier}
+                      </span>
+                    ) : null}
+                  </span>
                 </MenuRadioItem>
               ))}
             </MenuRadioGroup>
@@ -198,7 +212,14 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                             value={modelOption.slug}
                             onClick={() => setIsMenuOpen(false)}
                           >
-                            {modelOption.name}
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="min-w-0 truncate">{modelOption.name}</span>
+                              {modelOption.premiumRequestMultiplier ? (
+                                <span className="shrink-0 text-[10px] text-muted-foreground/80">
+                                  {modelOption.premiumRequestMultiplier}
+                                </span>
+                              ) : null}
+                            </span>
                           </MenuRadioItem>
                         ))}
                       </MenuRadioGroup>

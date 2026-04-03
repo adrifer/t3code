@@ -14,7 +14,18 @@ import {
 export interface SelectableModelOption {
   slug: string;
   name: string;
+  premiumRequestMultiplier?: string | undefined;
 }
+
+const COPILOT_API_MODEL_IDS: Record<string, string> = {
+  "claude-sonnet-4-6": "claude-sonnet-4.6",
+  "claude-sonnet-4-5": "claude-sonnet-4.5",
+  "claude-sonnet-4": "claude-sonnet-4",
+  "claude-haiku-4-5": "claude-haiku-4.5",
+  "claude-opus-4-6": "claude-opus-4.6",
+  "claude-opus-4-6-fast": "claude-opus-4.6-fast",
+  "claude-opus-4-5": "claude-opus-4.5",
+};
 
 // ── Effort helpers ────────────────────────────────────────────────────
 
@@ -251,6 +262,8 @@ export function resolveApiModelId(modelSelection: ModelSelection): string {
           return modelSelection.model;
       }
     }
+    case "copilot":
+      return COPILOT_API_MODEL_IDS[modelSelection.model] ?? modelSelection.model;
     default: {
       return modelSelection.model;
     }
