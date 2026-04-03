@@ -953,9 +953,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           const status = yield* checkCopilotProviderStatus(() =>
             Effect.succeed([
               {
-                slug: "claude-opus-4-6-1m",
-                name: "Claude Opus 4.6 (1M Context)",
-                premiumRequestMultiplier: "6x",
+                slug: "claude-opus-4-6",
+                name: "Claude Opus 4.6",
+                premiumRequestMultiplier: "3x",
               },
               {
                 slug: "gpt-5-mini",
@@ -970,7 +970,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
               premiumRequestMultiplier: model.premiumRequestMultiplier,
             })),
             [
-              { slug: "claude-opus-4-6-1m", premiumRequestMultiplier: "6x" },
+              { slug: "claude-opus-4-6", premiumRequestMultiplier: "3x" },
               { slug: "gpt-5-mini", premiumRequestMultiplier: "0x" },
             ],
           );
