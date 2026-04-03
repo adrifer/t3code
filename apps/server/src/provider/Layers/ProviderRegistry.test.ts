@@ -29,6 +29,7 @@ import {
   parseAuthStatusFromOutput,
   readCodexConfigModelProvider,
 } from "./CodexProvider";
+import { checkCopilotProviderStatus } from "./CopilotProvider";
 import { checkClaudeProviderStatus, parseClaudeAuthStatusFromOutput } from "./ClaudeProvider";
 import { haveProvidersChanged, ProviderRegistryLive } from "./ProviderRegistry";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings";
@@ -152,6 +153,28 @@ function withTempCodexHome(configContent?: string) {
 
     return { tmpDir } as const;
   });
+}
+
+function withTempEnv(name: string, value: string | undefined) {
+  return Effect.acquireRelease(
+    Effect.sync(() => {
+      const previous = process.env[name];
+      if (value === undefined) {
+        delete process.env[name];
+      } else {
+        process.env[name] = value;
+      }
+      return previous;
+    }),
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) {
+          delete process.env[name];
+        } else {
+          process.env[name] = previous;
+        }
+      }),
+  );
 }
 
 it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
@@ -531,6 +554,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
                 if (joined === "login status") {
                   return { stdout: "Logged in\n", stderr: "", code: 0 };
                 }
+                if (joined === "auth status") {
+                  return { stdout: "", stderr: "not logged in\n", code: 1 };
+                }
                 throw new Error(`Unexpected args: ${joined}`);
               }),
             ),
@@ -829,6 +855,83 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           yield* withTempCodexHome('model_provider = "my-company-proxy"\n');
           assert.strictEqual(yield* hasCustomModelProvider, true);
         }),
+      );
+    });
+
+    // ── checkCopilotProviderStatus tests ────────────────────────────────
+
+    describe("checkCopilotProviderStatus", () => {
+      it.effect("returns authenticated when GitHub CLI auth succeeds", () =>
+        Effect.gen(function* () {
+          yield* withTempEnv("COPILOT_PROVIDER_BASE_URL", undefined);
+          yield* withTempEnv("COPILOT_GITHUB_TOKEN", undefined);
+          yield* withTempEnv("GH_TOKEN", undefined);
+          yield* withTempEnv("GITHUB_TOKEN", undefined);
+          const status = yield* checkCopilotProviderStatus;
+          assert.strictEqual(status.provider, "copilot");
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.installed, true);
+          assert.strictEqual(status.auth.status, "authenticated");
+          assert.strictEqual(status.auth.type, "oauth");
+          assert.strictEqual(status.auth.label, "GitHub CLI");
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version")
+                return { stdout: "GitHub Copilot CLI 1.0.17.\n", stderr: "", code: 0 };
+              if (joined === "auth status") return { stdout: "Logged in\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("prefers token environment variables over GitHub CLI auth", () =>
+        Effect.gen(function* () {
+          yield* withTempEnv("COPILOT_PROVIDER_BASE_URL", undefined);
+          yield* withTempEnv("COPILOT_GITHUB_TOKEN", "github_pat_test");
+          yield* withTempEnv("GH_TOKEN", undefined);
+          yield* withTempEnv("GITHUB_TOKEN", undefined);
+          const status = yield* checkCopilotProviderStatus;
+          assert.strictEqual(status.auth.status, "authenticated");
+          assert.strictEqual(status.auth.type, "token");
+          assert.strictEqual(status.auth.label, "COPILOT_GITHUB_TOKEN");
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version")
+                return { stdout: "GitHub Copilot CLI 1.0.17.\n", stderr: "", code: 0 };
+              throw new Error(`Token auth should skip extra probes but got args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("keeps auth unknown when no supported auth signal is available", () =>
+        Effect.gen(function* () {
+          yield* withTempEnv("COPILOT_PROVIDER_BASE_URL", undefined);
+          yield* withTempEnv("COPILOT_GITHUB_TOKEN", undefined);
+          yield* withTempEnv("GH_TOKEN", undefined);
+          yield* withTempEnv("GITHUB_TOKEN", undefined);
+          const status = yield* checkCopilotProviderStatus;
+          assert.strictEqual(status.provider, "copilot");
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.installed, true);
+          assert.strictEqual(status.auth.status, "unknown");
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version")
+                return { stdout: "GitHub Copilot CLI 1.0.17.\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return { stdout: "", stderr: "not logged in\n", code: 1 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
       );
     });
 

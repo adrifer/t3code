@@ -13,6 +13,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   detailFromResult,
   isCommandMissingCause,
+  nonEmptyTrimmed,
   parseGenericCliVersion,
   providerModelsFromSettings,
   spawnAndCollect,
@@ -24,6 +25,7 @@ import { ServerSettingsError } from "@t3tools/contracts";
 import { resolveCommandExecution } from "../../wsl.ts";
 
 const PROVIDER = "copilot" as const;
+const COPILOT_AUTH_TOKEN_ENV_VARS = ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const;
 
 const COPILOT_REASONING_LEVELS = [
   { value: "xhigh", label: "Extra High" },
@@ -136,11 +138,40 @@ function copilotVersionCommand(settings: CopilotSettings) {
   });
 }
 
-function parseCopilotAuthStatus(): {
+function copilotGhAuthStatusCommand(settings: CopilotSettings) {
+  const execution = resolveCommandExecution({
+    command: "gh",
+    args: ["auth", "status"],
+    wsl: {
+      enabled: settings.useWsl,
+      distro: settings.wslDistro,
+      shellProfile: true,
+    },
+  });
+
+  return ChildProcess.make(execution.command, [...execution.args], {
+    shell: execution.shell,
+  });
+}
+
+type CopilotAuthProbe = {
   readonly status: Exclude<ServerProviderState, "disabled">;
   readonly auth: ServerProviderAuth;
-} {
-  for (const variable of ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const) {
+  readonly message?: string;
+};
+
+function parseCopilotAuthStatusFromEnvironment(): CopilotAuthProbe | null {
+  if (nonEmptyTrimmed(process.env.COPILOT_PROVIDER_BASE_URL)) {
+    return {
+      status: "ready",
+      auth: {
+        status: "unknown",
+      },
+      message: "Using a custom Copilot model provider; GitHub login check skipped.",
+    };
+  }
+
+  for (const variable of COPILOT_AUTH_TOKEN_ENV_VARS) {
     if (typeof process.env[variable] === "string" && process.env[variable]!.trim().length > 0) {
       return {
         status: "ready",
@@ -153,15 +184,47 @@ function parseCopilotAuthStatus(): {
     }
   }
 
+  return null;
+}
+
+const probeCopilotAuthStatus = Effect.fn("probeCopilotAuthStatus")(function* (
+  settings: CopilotSettings,
+) {
+  const environmentAuth = parseCopilotAuthStatusFromEnvironment();
+  if (environmentAuth) {
+    return environmentAuth;
+  }
+
+  const ghAuthProbe = yield* spawnAndCollect("gh", copilotGhAuthStatusCommand(settings)).pipe(
+    Effect.map((result): CopilotAuthProbe | null =>
+      result.code === 0
+        ? {
+            status: "ready",
+            auth: {
+              status: "authenticated",
+              type: "oauth",
+              label: "GitHub CLI",
+            },
+          }
+        : null,
+    ),
+    Effect.catch(() => Effect.succeed(null)),
+    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+  );
+
+  if (Option.isSome(ghAuthProbe) && ghAuthProbe.value) {
+    return ghAuthProbe.value;
+  }
+
   return {
     status: "ready",
     auth: {
       status: "unknown",
     },
-  };
-}
+  } satisfies CopilotAuthProbe;
+});
 
-const checkCopilotProviderStatus = Effect.gen(function* () {
+export const checkCopilotProviderStatus = Effect.gen(function* () {
   const settingsService = yield* ServerSettingsService;
   const copilotSettings = yield* settingsService.getSettings.pipe(
     Effect.map((settings) => settings.providers.copilot),
@@ -181,7 +244,7 @@ const checkCopilotProviderStatus = Effect.gen(function* () {
     PROVIDER,
     copilotSettings.customModels,
   );
-  const authProbe = parseCopilotAuthStatus();
+  const authProbe = yield* probeCopilotAuthStatus(copilotSettings);
 
   const versionResult = yield* spawnAndCollect(
     copilotSettings.binaryPath,
@@ -231,7 +294,9 @@ const checkCopilotProviderStatus = Effect.gen(function* () {
       status: result.code === 0 ? authProbe.status : "warning",
       auth: authProbe.auth,
       ...(result.code === 0
-        ? {}
+        ? authProbe.message
+          ? { message: authProbe.message }
+          : {}
         : {
             message:
               detailFromResult(result) ?? "GitHub Copilot CLI exited unexpectedly while probing.",
