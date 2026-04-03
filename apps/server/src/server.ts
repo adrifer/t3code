@@ -30,7 +30,6 @@ import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
 import { GitManagerLive } from "./git/Layers/GitManager";
 import { KeybindingsLive } from "./keybindings";
-import { ServerLoggerLive } from "./serverLogger";
 import { ServerRuntimeStartup, ServerRuntimeStartupLive } from "./serverRuntimeStartup";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus";
@@ -43,6 +42,7 @@ import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResol
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
+import { ObservabilityLive } from "./observability/Layers/Observability";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -100,12 +100,24 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
 
-const OrchestrationLayerLive = Layer.empty.pipe(
-  Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
-  Layer.provideMerge(OrchestrationEngineLive),
-  Layer.provideMerge(OrchestrationProjectionPipelineLive),
-  Layer.provideMerge(OrchestrationEventStoreLive),
-  Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
+const OrchestrationEventInfrastructureLayerLive = Layer.mergeAll(
+  OrchestrationEventStoreLive,
+  OrchestrationCommandReceiptRepositoryLive,
+);
+
+const OrchestrationProjectionPipelineLayerLive = OrchestrationProjectionPipelineLive.pipe(
+  Layer.provide(OrchestrationEventStoreLive),
+);
+
+const OrchestrationInfrastructureLayerLive = Layer.mergeAll(
+  OrchestrationProjectionSnapshotQueryLive,
+  OrchestrationEventInfrastructureLayerLive,
+  OrchestrationProjectionPipelineLayerLive,
+);
+
+const OrchestrationLayerLive = Layer.mergeAll(
+  OrchestrationInfrastructureLayerLive,
+  OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
 );
 
 const CheckpointingLayerLive = Layer.empty.pipe(
@@ -224,7 +236,7 @@ export const makeServerLayer = Layer.unwrap(
     return serverApplicationLayer.pipe(
       Layer.provideMerge(RuntimeServicesLive),
       Layer.provideMerge(HttpServerLive),
-      Layer.provide(ServerLoggerLive),
+      Layer.provide(ObservabilityLive),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provideMerge(PlatformServicesLive),
     );

@@ -1,5 +1,10 @@
 import { type GitActionProgressEvent, type GitStackedAction } from "@t3tools/contracts";
-import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  mutationOptions,
+  queryOptions,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { ensureNativeApi } from "../nativeApi";
 import { getWsRpcClient } from "../wsRpcClient";
 
@@ -7,11 +12,14 @@ const GIT_STATUS_STALE_TIME_MS = 5_000;
 const GIT_STATUS_REFETCH_INTERVAL_MS = 15_000;
 const GIT_BRANCHES_STALE_TIME_MS = 15_000;
 const GIT_BRANCHES_REFETCH_INTERVAL_MS = 60_000;
+const GIT_BRANCHES_PAGE_SIZE = 100;
 
 export const gitQueryKeys = {
   all: ["git"] as const,
   status: (cwd: string | null) => ["git", "status", cwd] as const,
   branches: (cwd: string | null) => ["git", "branches", cwd] as const,
+  branchSearch: (cwd: string | null, query: string) =>
+    ["git", "branches", cwd, "search", query] as const,
 };
 
 export const gitMutationKeys = {
@@ -23,8 +31,24 @@ export const gitMutationKeys = {
     ["git", "mutation", "prepare-pull-request-thread", cwd] as const,
 };
 
-export function invalidateGitQueries(queryClient: QueryClient) {
+export function invalidateGitQueries(queryClient: QueryClient, input?: { cwd?: string | null }) {
+  const cwd = input?.cwd ?? null;
+  if (cwd !== null) {
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: gitQueryKeys.status(cwd) }),
+      queryClient.invalidateQueries({ queryKey: gitQueryKeys.branches(cwd) }),
+    ]);
+  }
+
   return queryClient.invalidateQueries({ queryKey: gitQueryKeys.all });
+}
+
+export function invalidateGitStatusQuery(queryClient: QueryClient, cwd: string | null) {
+  if (cwd === null) {
+    return Promise.resolve();
+  }
+
+  return queryClient.invalidateQueries({ queryKey: gitQueryKeys.status(cwd) });
 }
 
 export function gitStatusQueryOptions(cwd: string | null) {
@@ -43,15 +67,28 @@ export function gitStatusQueryOptions(cwd: string | null) {
   });
 }
 
-export function gitBranchesQueryOptions(cwd: string | null) {
-  return queryOptions({
-    queryKey: gitQueryKeys.branches(cwd),
-    queryFn: async () => {
+export function gitBranchSearchInfiniteQueryOptions(input: {
+  cwd: string | null;
+  query: string;
+  enabled?: boolean;
+}) {
+  const normalizedQuery = input.query.trim();
+
+  return infiniteQueryOptions({
+    queryKey: gitQueryKeys.branchSearch(input.cwd, normalizedQuery),
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
       const api = ensureNativeApi();
-      if (!cwd) throw new Error("Git branches are unavailable.");
-      return api.git.listBranches({ cwd });
+      if (!input.cwd) throw new Error("Git branches are unavailable.");
+      return api.git.listBranches({
+        cwd: input.cwd,
+        ...(normalizedQuery.length > 0 ? { query: normalizedQuery } : {}),
+        cursor: pageParam,
+        limit: GIT_BRANCHES_PAGE_SIZE,
+      });
     },
-    enabled: cwd !== null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: input.cwd !== null && (input.enabled ?? true),
     staleTime: GIT_BRANCHES_STALE_TIME_MS,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
