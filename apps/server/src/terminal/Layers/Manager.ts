@@ -29,7 +29,7 @@ import {
   terminalSessionsTotal,
 } from "../../observability/Metrics";
 import { runProcess } from "../../processRunner";
-import { resolveWslExecutionTarget, resolveWslInteractiveShellExecution } from "../../wsl";
+import { resolveWslExecutionTarget } from "../../wsl";
 import {
   TerminalCwdError,
   TerminalHistoryError,
@@ -246,14 +246,11 @@ function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellC
 function resolveShellCandidates(shellResolver: () => string, cwd?: string): ShellCandidate[] {
   const wslTarget = resolveWslExecutionTarget({ cwd });
   if (process.platform === "win32" && wslTarget) {
-    const bootstrapExecution = resolveWslInteractiveShellExecution(wslTarget);
     return uniqueShellCandidates([
-      {
-        shell: bootstrapExecution.command,
-        args: [...bootstrapExecution.args],
-      },
+      makeWslShellCandidate(wslTarget, "/bin/zsh", ["-o", "nopromptsp"]),
       makeWslShellCandidate(wslTarget, "/bin/bash"),
       makeWslShellCandidate(wslTarget, "/bin/sh"),
+      makeWslShellCandidate(wslTarget, "zsh", ["-o", "nopromptsp"]),
       makeWslShellCandidate(wslTarget, "bash"),
       makeWslShellCandidate(wslTarget, "sh"),
     ]);

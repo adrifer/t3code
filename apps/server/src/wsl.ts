@@ -51,15 +51,11 @@ const ZSH_WSL_PROFILE_BOOTSTRAP = [
   "done;",
   'exec "$@"',
 ].join(" ");
-const WSL_SHELL_RESOLUTION_BOOTSTRAP = [
-  "resolve_user_shell() {",
+const WSL_PROFILE_BOOTSTRAP = [
   'user_shell="${SHELL:-}";',
   'if [ -z "$user_shell" ] && command -v getent >/dev/null 2>&1; then',
   '  login_user="$(id -un 2>/dev/null || true)";',
   '  if [ -n "$login_user" ]; then user_shell="$(getent passwd "$login_user" | cut -d: -f7)"; fi;',
-  "fi;",
-  'if [ -n "$user_shell" ]; then',
-  '  "$user_shell" -lc "exit 0" >/dev/null 2>&1 || user_shell="";',
   "fi;",
   'if [ -z "$user_shell" ] || [ ! -x "$user_shell" ]; then',
   "  if [ -x /bin/bash ]; then user_shell=/bin/bash;",
@@ -67,25 +63,12 @@ const WSL_SHELL_RESOLUTION_BOOTSTRAP = [
   "  else user_shell=/bin/sh; fi;",
   "fi;",
   'shell_name="${user_shell##*/}";',
-  "}",
-].join(" ");
-const WSL_PROFILE_BOOTSTRAP = [
-  WSL_SHELL_RESOLUTION_BOOTSTRAP,
-  "resolve_user_shell;",
   'case "$shell_name" in',
   `  bash) profile_script='${BASH_WSL_PROFILE_BOOTSTRAP}' ;;`,
   `  zsh) profile_script='${ZSH_WSL_PROFILE_BOOTSTRAP}' ;;`,
   `  *) profile_script='${DEFAULT_WSL_PROFILE_BOOTSTRAP}' ;;`,
   "esac;",
   'exec "$user_shell" -ic "$profile_script" "$shell_name" "$@"',
-].join(" ");
-const WSL_INTERACTIVE_SHELL_BOOTSTRAP = [
-  WSL_SHELL_RESOLUTION_BOOTSTRAP,
-  "resolve_user_shell;",
-  'case "$shell_name" in',
-  '  zsh) exec "$user_shell" -i -o nopromptsp ;;',
-  '  *) exec "$user_shell" -i ;;',
-  "esac;",
 ].join(" ");
 
 function shouldUseWslShellProfile(input: CommandExecutionInput): boolean {
@@ -171,24 +154,6 @@ export function translatePathForExecution(
   }
 
   return toWslPath(targetPath) ?? targetPath;
-}
-
-export function resolveWslInteractiveShellExecution(target: WslExecutionTarget): {
-  readonly command: "wsl.exe";
-  readonly args: ReadonlyArray<string>;
-} {
-  return {
-    command: "wsl.exe",
-    args: [
-      ...(target.distro ? ["-d", target.distro] : []),
-      ...(target.linuxCwd ? ["--cd", target.linuxCwd] : []),
-      "--exec",
-      "/bin/sh",
-      "-lc",
-      WSL_INTERACTIVE_SHELL_BOOTSTRAP,
-      "sh",
-    ],
-  };
 }
 
 export function resolveCommandExecution(input: CommandExecutionInput): ResolvedCommandExecution {
