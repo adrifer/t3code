@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   parseWslUncPath,
   resolveCommandExecution,
+  resolveWslInteractiveShellExecution,
   resolveWslExecutionTarget,
   toWslPath,
   translatePathForExecution,
@@ -134,6 +135,59 @@ describe("wsl helpers", () => {
         "--version",
       ],
       shell: false,
+    });
+  });
+
+  it("validates the detected WSL shell before using it", () => {
+    setPlatform("win32");
+    expect(
+      resolveCommandExecution({
+        command: "copilot",
+        args: ["--version"],
+        cwd: String.raw`\\wsl$\Ubuntu\home\dev\repo`,
+        wsl: {
+          shellProfile: true,
+        },
+      }),
+    ).toMatchObject({
+      command: "wsl.exe",
+      args: [
+        "-d",
+        "Ubuntu",
+        "--cd",
+        "/home/dev/repo",
+        "--exec",
+        "/bin/sh",
+        "-lc",
+        expect.stringContaining('"$user_shell" -lc "exit 0"'),
+        "sh",
+        "copilot",
+        "--version",
+      ],
+      shell: false,
+    });
+  });
+
+  it("builds a safe interactive WSL shell bootstrap", () => {
+    setPlatform("win32");
+    expect(
+      resolveWslInteractiveShellExecution({
+        distro: "Ubuntu",
+        linuxCwd: "/home/dev/repo",
+      }),
+    ).toMatchObject({
+      command: "wsl.exe",
+      args: [
+        "-d",
+        "Ubuntu",
+        "--cd",
+        "/home/dev/repo",
+        "--exec",
+        "/bin/sh",
+        "-lc",
+        expect.stringContaining('case "$shell_name" in'),
+        "sh",
+      ],
     });
   });
 
