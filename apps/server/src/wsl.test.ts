@@ -4,6 +4,7 @@ import {
   parseWslUncPath,
   resolveCommandExecution,
   resolveWslExecutionTarget,
+  resolveWslTerminalShell,
   toWslPath,
   translatePathForExecution,
 } from "./wsl";
@@ -75,6 +76,29 @@ describe("wsl helpers", () => {
         resolveWslExecutionTarget({ enabled: true, distro: "Ubuntu" }),
       ),
     ).toBe("/mnt/c/Users/dev/.t3/attachments/image.png");
+  });
+
+  it("boots interactive terminal shells through /bin/sh instead of assuming zsh exists", () => {
+    setPlatform("win32");
+    expect(
+      resolveWslTerminalShell({
+        distro: "Ubuntu",
+        linuxCwd: "/home/dev/repo",
+      }),
+    ).toEqual({
+      shell: "wsl.exe",
+      args: [
+        "-d",
+        "Ubuntu",
+        "--cd",
+        "/home/dev/repo",
+        "--exec",
+        "/bin/sh",
+        "-lc",
+        expect.stringContaining('exec "$user_shell" -o nopromptsp'),
+        "sh",
+      ],
+    });
   });
 
   it("can bootstrap a WSL shell profile before resolving commands", () => {

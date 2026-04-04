@@ -29,7 +29,7 @@ import {
   terminalSessionsTotal,
 } from "../../observability/Metrics";
 import { runProcess } from "../../processRunner";
-import { resolveWslExecutionTarget } from "../../wsl";
+import { resolveWslExecutionTarget, resolveWslTerminalShell } from "../../wsl";
 import {
   TerminalCwdError,
   TerminalHistoryError,
@@ -213,23 +213,6 @@ function formatShellCandidate(candidate: ShellCandidate): string {
   return `${candidate.shell} ${candidate.args.join(" ")}`;
 }
 
-function makeWslShellCandidate(
-  target: NonNullable<ReturnType<typeof resolveWslExecutionTarget>>,
-  shell: string,
-  args?: ReadonlyArray<string>,
-): ShellCandidate {
-  return {
-    shell: "wsl.exe",
-    args: [
-      ...(target.distro ? ["-d", target.distro] : []),
-      ...(target.linuxCwd ? ["--cd", target.linuxCwd] : []),
-      "--exec",
-      shell,
-      ...(args ?? []),
-    ],
-  };
-}
-
 function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellCandidate[] {
   const seen = new Set<string>();
   const ordered: ShellCandidate[] = [];
@@ -246,14 +229,7 @@ function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellC
 function resolveShellCandidates(shellResolver: () => string, cwd?: string): ShellCandidate[] {
   const wslTarget = resolveWslExecutionTarget({ cwd });
   if (process.platform === "win32" && wslTarget) {
-    return uniqueShellCandidates([
-      makeWslShellCandidate(wslTarget, "/bin/zsh", ["-o", "nopromptsp"]),
-      makeWslShellCandidate(wslTarget, "/bin/bash"),
-      makeWslShellCandidate(wslTarget, "/bin/sh"),
-      makeWslShellCandidate(wslTarget, "zsh", ["-o", "nopromptsp"]),
-      makeWslShellCandidate(wslTarget, "bash"),
-      makeWslShellCandidate(wslTarget, "sh"),
-    ]);
+    return uniqueShellCandidates([resolveWslTerminalShell(wslTarget)]);
   }
 
   const requested = shellCandidateFromCommand(normalizeShellCommand(shellResolver()));

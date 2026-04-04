@@ -36,22 +36,23 @@ function toPosixPath(value: string): string {
   return value.replaceAll("\\", "/");
 }
 
-const DEFAULT_WSL_PROFILE_BOOTSTRAP = 'export PATH="$HOME/.local/bin:$HOME/bin:$PATH"; exec "$@"';
+const WSL_USER_PATH_BOOTSTRAP = 'export PATH="$HOME/.local/bin:$HOME/bin:$PATH";';
+const DEFAULT_WSL_PROFILE_BOOTSTRAP = `${WSL_USER_PATH_BOOTSTRAP} exec "$@"`;
 const BASH_WSL_PROFILE_BOOTSTRAP = [
-  'export PATH="$HOME/.local/bin:$HOME/bin:$PATH";',
+  WSL_USER_PATH_BOOTSTRAP,
   'for file in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.bashrc"; do',
   '  if [ -f "$file" ]; then . "$file" >/dev/null 2>&1 || true; fi;',
   "done;",
   'exec "$@"',
 ].join(" ");
 const ZSH_WSL_PROFILE_BOOTSTRAP = [
-  'export PATH="$HOME/.local/bin:$HOME/bin:$PATH";',
+  WSL_USER_PATH_BOOTSTRAP,
   'for file in "$HOME/.profile" "$HOME/.zprofile" "$HOME/.zlogin" "$HOME/.zshrc"; do',
   '  if [ -f "$file" ]; then . "$file" >/dev/null 2>&1 || true; fi;',
   "done;",
   'exec "$@"',
 ].join(" ");
-const WSL_PROFILE_BOOTSTRAP = [
+const WSL_RESOLVE_USER_SHELL_BOOTSTRAP = [
   'user_shell="${SHELL:-}";',
   'if [ -z "$user_shell" ] && command -v getent >/dev/null 2>&1; then',
   '  login_user="$(id -un 2>/dev/null || true)";',
@@ -63,12 +64,23 @@ const WSL_PROFILE_BOOTSTRAP = [
   "  else user_shell=/bin/sh; fi;",
   "fi;",
   'shell_name="${user_shell##*/}";',
+].join(" ");
+const WSL_PROFILE_BOOTSTRAP = [
+  WSL_RESOLVE_USER_SHELL_BOOTSTRAP,
   'case "$shell_name" in',
   `  bash) profile_script='${BASH_WSL_PROFILE_BOOTSTRAP}' ;;`,
   `  zsh) profile_script='${ZSH_WSL_PROFILE_BOOTSTRAP}' ;;`,
   `  *) profile_script='${DEFAULT_WSL_PROFILE_BOOTSTRAP}' ;;`,
   "esac;",
   'exec "$user_shell" -ic "$profile_script" "$shell_name" "$@"',
+].join(" ");
+const WSL_INTERACTIVE_SHELL_BOOTSTRAP = [
+  WSL_USER_PATH_BOOTSTRAP,
+  WSL_RESOLVE_USER_SHELL_BOOTSTRAP,
+  'case "$shell_name" in',
+  '  zsh) exec "$user_shell" -o nopromptsp ;;',
+  '  *) exec "$user_shell" ;;',
+  "esac;",
 ].join(" ");
 
 function shouldUseWslShellProfile(input: CommandExecutionInput): boolean {
@@ -154,6 +166,24 @@ export function translatePathForExecution(
   }
 
   return toWslPath(targetPath) ?? targetPath;
+}
+
+export function resolveWslTerminalShell(target: WslExecutionTarget): {
+  readonly shell: "wsl.exe";
+  readonly args: string[];
+} {
+  return {
+    shell: "wsl.exe",
+    args: [
+      ...(target.distro ? ["-d", target.distro] : []),
+      ...(target.linuxCwd ? ["--cd", target.linuxCwd] : []),
+      "--exec",
+      "/bin/sh",
+      "-lc",
+      WSL_INTERACTIVE_SHELL_BOOTSTRAP,
+      "sh",
+    ],
+  };
 }
 
 export function resolveCommandExecution(input: CommandExecutionInput): ResolvedCommandExecution {
