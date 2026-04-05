@@ -161,6 +161,36 @@ describe("wsl helpers", () => {
     });
   });
 
+  it("validates the detected shell before using it for shell-profile bootstrap", () => {
+    setPlatform("win32");
+    expect(
+      resolveCommandExecution({
+        command: "copilot",
+        args: ["--version"],
+        cwd: String.raw`\\wsl$\Ubuntu\home\dev\repo`,
+        wsl: {
+          shellProfile: true,
+        },
+      }),
+    ).toMatchObject({
+      command: "wsl.exe",
+      args: [
+        "-d",
+        "Ubuntu",
+        "--cd",
+        "/home/dev/repo",
+        "--exec",
+        "/bin/sh",
+        "-lc",
+        expect.stringContaining('"$user_shell" -lc "exit 0"'),
+        "sh",
+        "copilot",
+        "--version",
+      ],
+      shell: false,
+    });
+  });
+
   it("can bootstrap WSL shell profiles for git commands too", () => {
     setPlatform("win32");
     expect(
