@@ -358,4 +358,112 @@ describe("CopilotAdapterLive", () => {
       assert.equal(toolUpdatedIndex < postToolDeltaIndex, true);
     }).pipe(Effect.provide(harness.layer));
   });
+
+  it.effect("passes autopilot mode through to the Copilot CLI", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* CopilotAdapter;
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "copilot",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "Finish the task autonomously",
+        interactionMode: "autopilot",
+        modelSelection: {
+          provider: "copilot",
+          model: "gpt-5.4",
+        },
+      });
+
+      const spawned = harness.getLastSpawn();
+      assert.equal(spawned?.args.includes("--autopilot"), true);
+
+      const process = harness.getLastProcess();
+      if (!process) {
+        return;
+      }
+
+      process.emitJson({
+        type: "assistant.message",
+        timestamp: "2026-04-01T17:00:00.000Z",
+        data: {
+          messageId: "assistant-autopilot",
+          content: "Done.",
+        },
+      });
+      process.emitJson({
+        type: "result",
+        timestamp: "2026-04-01T17:00:01.000Z",
+        sessionId: "copilot-session-autopilot",
+        exitCode: 0,
+      });
+      process.close(0);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("emits a proposed-plan event for Copilot plan mode responses", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* CopilotAdapter;
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "copilot",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "Plan the implementation",
+        interactionMode: "plan",
+        modelSelection: {
+          provider: "copilot",
+          model: "gpt-5.4",
+        },
+      });
+
+      const process = harness.getLastProcess();
+      if (!process) {
+        return;
+      }
+
+      process.emitJson({
+        type: "assistant.message",
+        timestamp: "2026-04-01T17:00:00.000Z",
+        data: {
+          messageId: "assistant-plan",
+          content: "# Plan\n\n1. Inspect the files.\n2. Make the change.",
+        },
+      });
+      process.emitJson({
+        type: "result",
+        timestamp: "2026-04-01T17:00:01.000Z",
+        sessionId: "copilot-session-plan",
+        exitCode: 0,
+      });
+      process.close(0);
+
+      const runtimeEvents = Array.from(
+        yield* Fiber.join(runtimeEventsFiber),
+      ) as ProviderRuntimeEvent[];
+      const proposedEvent = runtimeEvents.find((event) => event.type === "turn.proposed.completed");
+      assert.equal(proposedEvent?.type, "turn.proposed.completed");
+      if (proposedEvent?.type !== "turn.proposed.completed") {
+        return;
+      }
+      assert.equal(
+        proposedEvent.payload.planMarkdown,
+        "# Plan\n\n1. Inspect the files.\n2. Make the change.",
+      );
+    }).pipe(Effect.provide(harness.layer));
+  });
 });

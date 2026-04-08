@@ -183,8 +183,23 @@ function buildPrompt(input: {
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
   readonly attachmentPaths: ReadonlyArray<string>;
+  readonly interactionMode?: ProviderSendTurnInput["interactionMode"];
 }): string {
-  const sections = [input.text.trim()];
+  const sections =
+    input.interactionMode === "plan"
+      ? [
+          [
+            "Plan mode instructions:",
+            "- Produce an implementation plan only.",
+            "- Do not modify files, apply patches, or run commands.",
+            "- If you need more context, limit yourself to read-only tools.",
+            "- Return the final plan as concise markdown.",
+          ].join("\n"),
+          "",
+          "User request:",
+          input.text.trim(),
+        ]
+      : [input.text.trim()];
 
   if (input.attachments.length > 0) {
     sections.push(
@@ -633,8 +648,14 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         getCopilotModelCapabilities(modelSelection.model),
         modelSelection.options,
       );
+      const interactionMode = input.interactionMode;
+      const isPlanMode = interactionMode === "plan";
 
-      const promptInput = input.input?.trim() || "Review the attached context and continue.";
+      const promptInput =
+        input.input?.trim() ||
+        (isPlanMode
+          ? "Review the attached context and propose an implementation plan."
+          : "Review the attached context and continue.");
       const attachments = input.attachments ?? [];
       const executionTarget = resolveWslExecutionTarget({
         cwd: context.session.cwd,
@@ -650,6 +671,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         text: promptInput,
         attachments,
         attachmentPaths,
+        interactionMode,
       });
 
       const turnId = nextTurnId();
@@ -667,6 +689,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         ...(normalizedOptions?.reasoningEffort
           ? ["--effort", normalizedOptions.reasoningEffort]
           : []),
+        ...(interactionMode === "autopilot" ? ["--autopilot"] : []),
         ...(resumedSessionId ? [`--resume=${resumedSessionId}`] : []),
         "-p",
         prompt,
@@ -972,6 +995,22 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
                 itemType: "assistant_message",
                 title: "Assistant message",
                 detail: assistantText,
+              },
+            }),
+          );
+        }
+
+        if (completionState === "completed" && isPlanMode && assistantText.trim().length > 0) {
+          runFork(
+            offerRuntimeEvent({
+              type: "turn.proposed.completed",
+              eventId: nextEventId(),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              turnId,
+              createdAt: nowIso(),
+              payload: {
+                planMarkdown: assistantText.trim(),
               },
             }),
           );

@@ -115,6 +115,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
     <CompactComposerControlsMenu
       activePlan={false}
       interactionMode="default"
+      provider={provider}
       planSidebarOpen={false}
       runtimeMode="approval-required"
       traitsMenuContent={
@@ -128,7 +129,7 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
           onPromptChange={onPromptChange}
         />
       }
-      onToggleInteractionMode={vi.fn()}
+      onInteractionModeChange={vi.fn()}
       onTogglePlanSidebar={vi.fn()}
       onToggleRuntimeMode={vi.fn()}
     />,
@@ -198,6 +199,18 @@ describe("CompactComposerControlsMenu", () => {
       expect(text).toContain("High");
       expect(text).not.toContain("Max");
       expect(text).toContain("Ultrathink");
+    });
+  });
+
+  it("shows autopilot in the mode menu for Copilot", async () => {
+    await using _ = await mountMenu({
+      modelSelection: { provider: "copilot", model: "gpt-5.4" },
+    });
+
+    await page.getByLabelText("More composer controls").click();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").toContain("Autopilot");
     });
   });
 

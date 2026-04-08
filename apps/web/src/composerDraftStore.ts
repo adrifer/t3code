@@ -801,7 +801,8 @@ function normalizePersistedDraftThreads(
             : DEFAULT_RUNTIME_MODE,
         interactionMode:
           candidateDraftThread.interactionMode === "plan" ||
-          candidateDraftThread.interactionMode === "default"
+          candidateDraftThread.interactionMode === "default" ||
+          candidateDraftThread.interactionMode === "autopilot"
             ? candidateDraftThread.interactionMode
             : DEFAULT_INTERACTION_MODE,
         branch: typeof branch === "string" ? branch : null,
@@ -885,7 +886,9 @@ function normalizePersistedDraftsByThreadId(
         ? draftCandidate.runtimeMode
         : null;
     const interactionMode =
-      draftCandidate.interactionMode === "plan" || draftCandidate.interactionMode === "default"
+      draftCandidate.interactionMode === "plan" ||
+      draftCandidate.interactionMode === "default" ||
+      draftCandidate.interactionMode === "autopilot"
         ? draftCandidate.interactionMode
         : null;
     const prompt = ensureInlineTerminalContextPlaceholders(
@@ -1840,7 +1843,11 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return;
         }
         const nextInteractionMode =
-          interactionMode === "plan" || interactionMode === "default" ? interactionMode : null;
+          interactionMode === "plan" ||
+          interactionMode === "default" ||
+          interactionMode === "autopilot"
+            ? interactionMode
+            : null;
         set((state) => {
           const existing = state.draftsByThreadId[threadId];
           if (!existing && nextInteractionMode === null) {

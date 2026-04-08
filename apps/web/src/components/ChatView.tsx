@@ -76,6 +76,11 @@ import {
   resolvePlanFollowUpSubmission,
 } from "../proposedPlan";
 import {
+  getInteractionModesForProvider,
+  INTERACTION_MODE_LABELS,
+  normalizeInteractionModeForProvider,
+} from "../interactionModes";
+import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   DEFAULT_THREAD_TERMINAL_ID,
@@ -106,6 +111,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
 import { Separator } from "./ui/separator";
 import { cn, randomUUID } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -827,7 +833,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activeThread = serverThread ?? localDraftThread;
   const runtimeMode =
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
-  const interactionMode =
+  const storedInteractionMode =
     composerDraft.interactionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
@@ -999,6 +1005,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? "codex",
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
+  const interactionMode = normalizeInteractionModeForProvider(
+    selectedProvider,
+    storedInteractionMode,
+  );
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadId,
     providers: providerStatuses,
@@ -1475,6 +1485,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
           label: "/default",
           description: "Switch this thread back to normal chat mode",
         },
+        ...(selectedProvider === "copilot"
+          ? [
+              {
+                id: "slash:autopilot",
+                type: "slash-command" as const,
+                command: "autopilot" as const,
+                label: "/autopilot",
+                description: "Switch this Copilot thread into autopilot mode",
+              },
+            ]
+          : []),
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
       if (!query) {
@@ -1501,7 +1522,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         label: name,
         description: `${providerLabel} · ${slug}`,
       }));
-  }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+  }, [composerTrigger, searchableModelOptions, selectedProvider, workspaceEntries]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -1991,10 +2012,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const handleInteractionModeChange = useCallback(
     (mode: ProviderInteractionMode) => {
-      if (mode === interactionMode) return;
-      setComposerDraftInteractionMode(threadId, mode);
+      const nextMode = normalizeInteractionModeForProvider(selectedProvider, mode);
+      if (nextMode === interactionMode) return;
+      setComposerDraftInteractionMode(threadId, nextMode);
       if (isLocalDraftThread) {
-        setDraftThreadContext(threadId, { interactionMode: mode });
+        setDraftThreadContext(threadId, { interactionMode: nextMode });
       }
       scheduleComposerFocus();
     },
@@ -2002,14 +2024,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
       interactionMode,
       isLocalDraftThread,
       scheduleComposerFocus,
+      selectedProvider,
       setComposerDraftInteractionMode,
       setDraftThreadContext,
       threadId,
     ],
   );
-  const toggleInteractionMode = useCallback(() => {
-    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
-  }, [handleInteractionModeChange, interactionMode]);
+  const cycleInteractionMode = useCallback(() => {
+    const modes = getInteractionModesForProvider(selectedProvider);
+    const currentIndex = modes.indexOf(interactionMode);
+    const nextMode = modes[(currentIndex + 1 + modes.length) % modes.length];
+    if (nextMode) {
+      void handleInteractionModeChange(nextMode);
+    }
+  }, [handleInteractionModeChange, interactionMode, selectedProvider]);
   const toggleRuntimeMode = useCallback(() => {
     void handleRuntimeModeChange(
       runtimeMode === "full-access" ? "approval-required" : "full-access",
@@ -3550,14 +3578,28 @@ export default function ChatView({ threadId }: ChatViewProps) {
         model: resolvedModel,
       };
       setComposerDraftModelSelection(activeThread.id, nextModelSelection);
+      const nextInteractionMode = normalizeInteractionModeForProvider(
+        resolvedProvider,
+        interactionMode,
+      );
+      if (nextInteractionMode !== interactionMode) {
+        setComposerDraftInteractionMode(activeThread.id, nextInteractionMode);
+        if (isLocalDraftThread) {
+          setDraftThreadContext(activeThread.id, { interactionMode: nextInteractionMode });
+        }
+      }
       setStickyComposerModelSelection(nextModelSelection);
       scheduleComposerFocus();
     },
     [
       activeThread,
+      interactionMode,
+      isLocalDraftThread,
       lockedProvider,
       scheduleComposerFocus,
+      setComposerDraftInteractionMode,
       setComposerDraftModelSelection,
+      setDraftThreadContext,
       setStickyComposerModelSelection,
       providerStatuses,
       settings,
@@ -3728,7 +3770,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
+        void handleInteractionModeChange(item.command);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -3826,7 +3868,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     event: KeyboardEvent,
   ) => {
     if (key === "Tab" && event.shiftKey) {
-      toggleInteractionMode();
+      cycleInteractionMode();
       return true;
     }
 
@@ -4251,10 +4293,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               activePlan || sidebarProposedPlan || planSidebarOpen,
                             )}
                             interactionMode={interactionMode}
+                            provider={selectedProvider}
                             planSidebarOpen={planSidebarOpen}
                             runtimeMode={runtimeMode}
                             traitsMenuContent={providerTraitsMenuContent}
-                            onToggleInteractionMode={toggleInteractionMode}
+                            onInteractionModeChange={handleInteractionModeChange}
                             onTogglePlanSidebar={togglePlanSidebar}
                             onToggleRuntimeMode={toggleRuntimeMode}
                           />
@@ -4275,23 +4318,45 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               className="mx-0.5 hidden h-4 sm:block"
                             />
 
-                            <Button
-                              variant="ghost"
-                              className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                              size="sm"
-                              type="button"
-                              onClick={toggleInteractionMode}
-                              title={
-                                interactionMode === "plan"
-                                  ? "Plan mode — click to return to normal chat mode"
-                                  : "Default mode — click to enter plan mode"
-                              }
-                            >
-                              <BotIcon />
-                              <span className="sr-only sm:not-sr-only">
-                                {interactionMode === "plan" ? "Plan" : "Chat"}
-                              </span>
-                            </Button>
+                            <Menu>
+                              <MenuTrigger
+                                render={
+                                  <Button
+                                    variant="ghost"
+                                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                                    size="sm"
+                                    type="button"
+                                    title="Select interaction mode"
+                                  />
+                                }
+                              >
+                                <BotIcon />
+                                <span className="sr-only sm:not-sr-only">
+                                  {INTERACTION_MODE_LABELS[interactionMode]}
+                                </span>
+                                <ChevronDownIcon className="size-3 opacity-70" />
+                              </MenuTrigger>
+                              <MenuPopup align="start">
+                                <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+                                  Mode
+                                </div>
+                                <MenuRadioGroup
+                                  value={interactionMode}
+                                  onValueChange={(value) => {
+                                    if (!value || value === interactionMode) return;
+                                    void handleInteractionModeChange(
+                                      value as ProviderInteractionMode,
+                                    );
+                                  }}
+                                >
+                                  {getInteractionModesForProvider(selectedProvider).map((mode) => (
+                                    <MenuRadioItem key={mode} value={mode}>
+                                      {INTERACTION_MODE_LABELS[mode]}
+                                    </MenuRadioItem>
+                                  ))}
+                                </MenuRadioGroup>
+                              </MenuPopup>
+                            </Menu>
 
                             <Separator
                               orientation="vertical"

@@ -1,6 +1,7 @@
-import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import { ProviderInteractionMode, type ProviderKind, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
 import { EllipsisIcon, ListTodoIcon } from "lucide-react";
+import { getInteractionModesForProvider, INTERACTION_MODE_LABELS } from "../../interactionModes";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -15,10 +16,11 @@ import {
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   activePlan: boolean;
   interactionMode: ProviderInteractionMode;
+  provider: ProviderKind;
   planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
   traitsMenuContent?: ReactNode;
-  onToggleInteractionMode: () => void;
+  onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onTogglePlanSidebar: () => void;
   onToggleRuntimeMode: () => void;
 }) {
@@ -48,11 +50,14 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           value={props.interactionMode}
           onValueChange={(value) => {
             if (!value || value === props.interactionMode) return;
-            props.onToggleInteractionMode();
+            props.onInteractionModeChange(value as ProviderInteractionMode);
           }}
         >
-          <MenuRadioItem value="default">Chat</MenuRadioItem>
-          <MenuRadioItem value="plan">Plan</MenuRadioItem>
+          {getInteractionModesForProvider(props.provider).map((mode) => (
+            <MenuRadioItem key={mode} value={mode}>
+              {INTERACTION_MODE_LABELS[mode]}
+            </MenuRadioItem>
+          ))}
         </MenuRadioGroup>
         <MenuDivider />
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
