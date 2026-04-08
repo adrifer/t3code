@@ -225,6 +225,7 @@ export const checkCopilotProviderStatus = (
       providerModelsFromCatalog(modelCatalog),
       PROVIDER,
       copilotSettings.customModels,
+      COPILOT_DEFAULT_MODEL_CAPABILITIES,
     );
     const authProbe = yield* probeCopilotAuthStatus(copilotSettings);
 
@@ -309,6 +310,7 @@ export const checkCopilotProviderStatus = (
               BUILT_IN_MODELS,
               PROVIDER,
               copilotSettings.customModels,
+              COPILOT_DEFAULT_MODEL_CAPABILITIES,
             ),
             probe: {
               installed: false,

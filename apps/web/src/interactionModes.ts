@@ -1,7 +1,7 @@
 import type { ProviderInteractionMode, ProviderKind } from "@t3tools/contracts";
 
 export const INTERACTION_MODE_LABELS: Record<ProviderInteractionMode, string> = {
-  default: "Chat",
+  default: "Build",
   plan: "Plan",
   autopilot: "Autopilot",
 };

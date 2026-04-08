@@ -1,7 +1,7 @@
 import {
   OrchestrationEvent,
-  ThreadId,
   type ServerLifecycleWelcomePayload,
+  type ThreadId,
 } from "@t3tools/contracts";
 import {
   Outlet,
@@ -16,6 +16,11 @@ import { Throttler } from "@tanstack/react-pacer";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import {
+  SlowRpcAckToastCoordinator,
+  WebSocketConnectionCoordinator,
+  WebSocketConnectionSurface,
+} from "../components/WebSocketConnectionSurface";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
@@ -36,13 +41,13 @@ import {
 import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { useTerminalStateStore } from "../terminalStateStore";
-import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { migrateLocalSettingsToServer } from "../hooks/useSettings";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
+import { deriveReplayRetryDecision } from "../orchestrationRecovery";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 export const Route = createRootRouteWithContext<{
@@ -73,9 +78,13 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <ServerStateBootstrap />
         <EventRouter />
-        <AppSidebarLayout>
-          <Outlet />
-        </AppSidebarLayout>
+        <WebSocketConnectionCoordinator />
+        <SlowRpcAckToastCoordinator />
+        <WebSocketConnectionSurface>
+          <AppSidebarLayout>
+            <Outlet />
+          </AppSidebarLayout>
+        </WebSocketConnectionSurface>
       </AnchoredToastProvider>
     </ToastProvider>
   );
@@ -189,6 +198,9 @@ function coalesceOrchestrationUiEvents(
   return coalesced;
 }
 
+const REPLAY_RECOVERY_RETRY_DELAY_MS = 100;
+const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
+
 function ServerStateBootstrap() {
   useEffect(() => startServerStateSync(getWsRpcClient().server), []);
 
@@ -206,6 +218,7 @@ function EventRouter() {
   const removeOrphanedTerminalStates = useTerminalStateStore(
     (store) => store.removeOrphanedTerminalStates,
   );
+  const applyTerminalEvent = useTerminalStateStore((store) => store.applyTerminalEvent);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
@@ -309,6 +322,7 @@ function EventRouter() {
     let disposed = false;
     disposedRef.current = false;
     const recovery = createOrchestrationRecoveryCoordinator();
+    let replayRetryTracker: import("../orchestrationRecovery").ReplayRetryTracker | null = null;
     let needsProviderInvalidation = false;
     const pendingDomainEvents: OrchestrationEvent[] = [];
     let flushPendingDomainEventsScheduled = false;
@@ -423,8 +437,8 @@ function EventRouter() {
       queueMicrotask(flushPendingDomainEvents);
     };
 
-    const recoverFromSequenceGap = async (): Promise<void> => {
-      if (!recovery.beginReplayRecovery("sequence-gap")) {
+    const runReplayRecovery = async (reason: "sequence-gap" | "resubscribe"): Promise<void> => {
+      if (!recovery.beginReplayRecovery(reason)) {
         return;
       }
 
@@ -435,13 +449,42 @@ function EventRouter() {
           applyEventBatch(events);
         }
       } catch {
+        replayRetryTracker = null;
         recovery.failReplayRecovery();
         void fallbackToSnapshotRecovery();
         return;
       }
 
-      if (!disposed && recovery.completeReplayRecovery()) {
-        void recoverFromSequenceGap();
+      if (!disposed) {
+        const replayCompletion = recovery.completeReplayRecovery();
+        const retryDecision = deriveReplayRetryDecision({
+          previousTracker: replayRetryTracker,
+          completion: replayCompletion,
+          recoveryState: recovery.getState(),
+          baseDelayMs: REPLAY_RECOVERY_RETRY_DELAY_MS,
+          maxNoProgressRetries: MAX_NO_PROGRESS_REPLAY_RETRIES,
+        });
+        replayRetryTracker = retryDecision.tracker;
+
+        if (retryDecision.shouldRetry) {
+          if (retryDecision.delayMs > 0) {
+            await new Promise<void>((resolve) => {
+              setTimeout(resolve, retryDecision.delayMs);
+            });
+            if (disposed) {
+              return;
+            }
+          }
+          void runReplayRecovery(reason);
+        } else if (replayCompletion.shouldReplay && import.meta.env.MODE !== "test") {
+          console.warn(
+            "[orchestration-recovery]",
+            "Stopping replay recovery after no-progress retries.",
+            {
+              state: recovery.getState(),
+            },
+          );
+        }
       }
     };
 
@@ -471,7 +514,7 @@ function EventRouter() {
           syncServerReadModel(snapshot);
           reconcileSnapshotDerivedState();
           if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {
-            void recoverFromSequenceGap();
+            void runReplayRecovery("sequence-gap");
           }
         }
       } catch {
@@ -488,35 +531,35 @@ function EventRouter() {
     const fallbackToSnapshotRecovery = async (): Promise<void> => {
       await runSnapshotRecovery("replay-failed");
     };
-    const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
-      const action = recovery.classifyDomainEvent(event.sequence);
-      if (action === "apply") {
-        pendingDomainEvents.push(event);
-        schedulePendingDomainEventFlush();
-        return;
-      }
-      if (action === "recover") {
-        flushPendingDomainEvents();
-        void recoverFromSequenceGap();
-      }
-    });
+    const unsubDomainEvent = api.orchestration.onDomainEvent(
+      (event) => {
+        const action = recovery.classifyDomainEvent(event.sequence);
+        if (action === "apply") {
+          pendingDomainEvents.push(event);
+          schedulePendingDomainEventFlush();
+          return;
+        }
+        if (action === "recover") {
+          flushPendingDomainEvents();
+          void runReplayRecovery("sequence-gap");
+        }
+      },
+      {
+        onResubscribe: () => {
+          if (disposed) {
+            return;
+          }
+          flushPendingDomainEvents();
+          void runReplayRecovery("resubscribe");
+        },
+      },
+    );
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
       const thread = useStore.getState().threads.find((entry) => entry.id === event.threadId);
       if (thread && thread.archivedAt !== null) {
         return;
       }
-      useTerminalStateStore.getState().recordTerminalEvent(event);
-      const hasRunningSubprocess = terminalRunningSubprocessFromEvent(event);
-      if (hasRunningSubprocess === null) {
-        return;
-      }
-      useTerminalStateStore
-        .getState()
-        .setTerminalActivity(
-          ThreadId.makeUnsafe(event.threadId),
-          event.terminalId,
-          hasRunningSubprocess,
-        );
+      applyTerminalEvent(event);
     });
     return () => {
       disposed = true;
@@ -534,6 +577,7 @@ function EventRouter() {
     queryClient,
     removeTerminalState,
     removeOrphanedTerminalStates,
+    applyTerminalEvent,
     clearThreadUi,
     setProjectExpanded,
     syncProjects,
