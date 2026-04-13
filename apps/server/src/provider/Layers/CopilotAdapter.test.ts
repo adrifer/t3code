@@ -60,7 +60,7 @@ function makeHarness() {
   };
 }
 
-const THREAD_ID = ThreadId.makeUnsafe("thread-copilot-1");
+const THREAD_ID = ThreadId.make("thread-copilot-1");
 
 describe("CopilotAdapterLive", () => {
   it.effect("maps Copilot tool execution events into runtime tool lifecycle events", () => {

@@ -108,15 +108,15 @@ function nowIso(): string {
 }
 
 function nextEventId() {
-  return EventId.makeUnsafe(crypto.randomUUID());
+  return EventId.make(crypto.randomUUID());
 }
 
 function nextTurnId() {
-  return TurnId.makeUnsafe(crypto.randomUUID());
+  return TurnId.make(crypto.randomUUID());
 }
 
 function nextItemId() {
-  return RuntimeItemId.makeUnsafe(crypto.randomUUID());
+  return RuntimeItemId.make(crypto.randomUUID());
 }
 
 function toMessage(cause: unknown, fallback: string): string {
@@ -426,7 +426,7 @@ function getAssistantSegment(
   const next: CopilotAssistantMessageState = {
     segmentKey,
     messageId,
-    itemId: RuntimeItemId.makeUnsafe(
+    itemId: RuntimeItemId.make(
       `copilot-assistant:${messageId}:${activeTurn.assistantSegmentIndex}`,
     ),
     text: "",
@@ -453,7 +453,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         })
       : undefined);
 
-  const services = yield* Effect.services();
+  const services = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(services);
   const spawnProcess =
     options?.spawnProcess ??
@@ -831,7 +831,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
             const detail = summarizeToolCall(event.data.toolName, inputArgs);
             const toolState: CopilotToolCallState = {
               toolCallId: event.data.toolCallId,
-              itemId: RuntimeItemId.makeUnsafe(`copilot-tool:${event.data.toolCallId}`),
+              itemId: RuntimeItemId.make(`copilot-tool:${event.data.toolCallId}`),
               toolName: event.data.toolName,
               itemType,
               title: prettifyToolName(event.data.toolName),
@@ -872,7 +872,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
             const toolState = activeTurn.toolCalls.get(event.data.toolCallId);
             const fallbackToolState: CopilotToolCallState = toolState ?? {
               toolCallId: event.data.toolCallId,
-              itemId: RuntimeItemId.makeUnsafe(`copilot-tool:${event.data.toolCallId}`),
+              itemId: RuntimeItemId.make(`copilot-tool:${event.data.toolCallId}`),
               toolName: "tool",
               itemType: "dynamic_tool_call",
               title: "Tool",

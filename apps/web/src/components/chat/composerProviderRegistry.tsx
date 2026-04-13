@@ -165,34 +165,47 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
   copilot: {
     getState: (input) => getProviderStateFromCapabilities(input),
     renderTraitsMenuContent: ({
-      threadId,
+      threadRef,
+      draftId,
       model,
       models,
       modelOptions,
       prompt,
       onPromptChange,
-    }) => (
-      <TraitsMenuContent
-        provider="copilot"
-        models={models}
-        threadId={threadId}
-        model={model}
-        modelOptions={modelOptions}
-        prompt={prompt}
-        onPromptChange={onPromptChange}
-      />
-    ),
-    renderTraitsPicker: ({ threadId, model, models, modelOptions, prompt, onPromptChange }) => (
-      <TraitsPicker
-        provider="copilot"
-        models={models}
-        threadId={threadId}
-        model={model}
-        modelOptions={modelOptions}
-        prompt={prompt}
-        onPromptChange={onPromptChange}
-      />
-    ),
+    }) =>
+      !hasComposerTraitsTarget({ threadRef, draftId }) ? null : (
+        <TraitsMenuContent
+          provider="copilot"
+          models={models}
+          {...(threadRef ? { threadRef } : {})}
+          {...(draftId ? { draftId } : {})}
+          model={model}
+          modelOptions={modelOptions}
+          prompt={prompt}
+          onPromptChange={onPromptChange}
+        />
+      ),
+    renderTraitsPicker: ({
+      threadRef,
+      draftId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+    }) =>
+      !hasComposerTraitsTarget({ threadRef, draftId }) ? null : (
+        <TraitsPicker
+          provider="copilot"
+          models={models}
+          {...(threadRef ? { threadRef } : {})}
+          {...(draftId ? { draftId } : {})}
+          model={model}
+          modelOptions={modelOptions}
+          prompt={prompt}
+          onPromptChange={onPromptChange}
+        />
+      ),
   },
   claudeAgent: {
     getState: (input) => getProviderStateFromCapabilities(input),

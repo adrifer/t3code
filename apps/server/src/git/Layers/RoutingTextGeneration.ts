@@ -32,7 +32,7 @@ class ClaudeTextGen extends Context.Service<ClaudeTextGen, TextGenerationShape>(
   "t3/git/Layers/RoutingTextGeneration/ClaudeTextGen",
 ) {}
 
-class CopilotTextGen extends ServiceMap.Service<CopilotTextGen, TextGenerationShape>()(
+class CopilotTextGen extends Context.Service<CopilotTextGen, TextGenerationShape>()(
   "t3/git/Layers/RoutingTextGeneration/CopilotTextGen",
 ) {}
 
