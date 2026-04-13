@@ -14,6 +14,7 @@ import {
   ApprovalRequestId,
   ProviderItemId,
   ProviderRuntimeEvent,
+  type RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
@@ -236,8 +237,8 @@ async function readFirstPromptMessage(
   return next.value;
 }
 
-const THREAD_ID = ThreadId.makeUnsafe("thread-claude-1");
-const RESUME_THREAD_ID = ThreadId.makeUnsafe("thread-claude-resume");
+const THREAD_ID = ThreadId.make("thread-claude-1");
+const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
 
 describe("ClaudeAdapterLive", () => {
   it.effect("returns validation error for non-claude provider on startSession", () => {
@@ -1103,8 +1104,8 @@ describe("ClaudeAdapterLive", () => {
   it.effect("closes the session when the Claude stream aborts after a turn starts", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
-      const services = yield* Effect.services();
-      const runFork = Effect.runForkWith(services);
+      const context = yield* Effect.context<never>();
+      const runFork = Effect.runForkWith(context);
 
       const adapter = yield* ClaudeAdapter;
       const runtimeEvents: Array<ProviderRuntimeEvent> = [];
@@ -1203,8 +1204,8 @@ describe("ClaudeAdapterLive", () => {
     );
 
     return Effect.gen(function* () {
-      const services = yield* Effect.services();
-      const runFork = Effect.runForkWith(services);
+      const context = yield* Effect.context<never>();
+      const runFork = Effect.runForkWith(context);
 
       const adapter = yield* ClaudeAdapter;
 
@@ -1406,6 +1407,150 @@ describe("ClaudeAdapterLive", () => {
       Effect.provide(harness.layer),
     );
   });
+
+  it.effect("clamps oversized Claude usage to the reported context window", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 1234,
+        duration_api_ms: 1200,
+        num_turns: 1,
+        result: "done",
+        stop_reason: "end_turn",
+        session_id: "sdk-session-result-usage-clamped",
+        usage: {
+          total_tokens: 535000,
+        },
+        modelUsage: {
+          "claude-opus-4-6": {
+            contextWindow: 200000,
+            maxOutputTokens: 64000,
+          },
+        },
+      } as unknown as SDKMessage);
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const usageEvent = runtimeEvents.find((event) => event.type === "thread.token-usage.updated");
+      assert.equal(usageEvent?.type, "thread.token-usage.updated");
+      if (usageEvent?.type === "thread.token-usage.updated") {
+        assert.deepEqual(usageEvent.payload, {
+          usage: {
+            usedTokens: 200000,
+            lastUsedTokens: 200000,
+            totalProcessedTokens: 535000,
+            maxTokens: 200000,
+          },
+        });
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect(
+    "preserves oversized Claude result totals after task progress snapshots are recorded",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+
+        const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode: "full-access",
+        });
+
+        yield* adapter.sendTurn({
+          threadId: THREAD_ID,
+          input: "hello",
+          attachments: [],
+        });
+
+        harness.query.emit({
+          type: "system",
+          subtype: "task_progress",
+          task_id: "task-usage-clamped",
+          description: "Thinking through the patch",
+          usage: {
+            total_tokens: 190000,
+          },
+          session_id: "sdk-session-task-usage-clamped",
+          uuid: "task-usage-progress-clamped",
+        } as unknown as SDKMessage);
+
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          duration_ms: 1234,
+          duration_api_ms: 1200,
+          num_turns: 1,
+          result: "done",
+          stop_reason: "end_turn",
+          session_id: "sdk-session-result-usage-clamped-after-progress",
+          usage: {
+            total_tokens: 535000,
+          },
+          modelUsage: {
+            "claude-opus-4-6": {
+              contextWindow: 200000,
+              maxOutputTokens: 64000,
+            },
+          },
+        } as unknown as SDKMessage);
+        harness.query.finish();
+
+        const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+        const usageEvents = runtimeEvents.filter(
+          (event) => event.type === "thread.token-usage.updated",
+        );
+        const finalUsageEvent = usageEvents.at(-1);
+        assert.equal(finalUsageEvent?.type, "thread.token-usage.updated");
+        if (finalUsageEvent?.type === "thread.token-usage.updated") {
+          assert.deepEqual(finalUsageEvent.payload, {
+            usage: {
+              usedTokens: 190000,
+              lastUsedTokens: 190000,
+              totalProcessedTokens: 535000,
+              maxTokens: 200000,
+            },
+          });
+        }
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
 
   it.effect(
     "emits completion only after turn result when assistant frames arrive before deltas",
@@ -2107,7 +2252,7 @@ describe("ClaudeAdapterLive", () => {
         return;
       }
       assert.deepEqual(requested.value.providerRefs, {
-        providerItemId: ProviderItemId.makeUnsafe("tool-use-1"),
+        providerItemId: ProviderItemId.make("tool-use-1"),
       });
       const runtimeRequestId = requested.value.requestId;
       assert.equal(typeof runtimeRequestId, "string");
@@ -2117,7 +2262,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.respondToRequest(
         session.threadId,
-        ApprovalRequestId.makeUnsafe(runtimeRequestId),
+        ApprovalRequestId.make(runtimeRequestId),
         "accept",
       );
 
@@ -2133,7 +2278,7 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(resolved.value.requestId, requested.value.requestId);
       assert.equal(resolved.value.payload.decision, "accept");
       assert.deepEqual(resolved.value.providerRefs, {
-        providerItemId: ProviderItemId.makeUnsafe("tool-use-1"),
+        providerItemId: ProviderItemId.make("tool-use-1"),
       });
 
       const permissionResult = yield* Effect.promise(() => permissionPromise);
@@ -2182,7 +2327,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.respondToRequest(
         session.threadId,
-        ApprovalRequestId.makeUnsafe(String(agentRequested.value.requestId)),
+        ApprovalRequestId.make(String(agentRequested.value.requestId)),
         "accept",
       );
       yield* Stream.runHead(adapter.streamEvents);
@@ -2206,7 +2351,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.respondToRequest(
         session.threadId,
-        ApprovalRequestId.makeUnsafe(String(grepRequested.value.requestId)),
+        ApprovalRequestId.make(String(grepRequested.value.requestId)),
         "accept",
       );
       yield* Stream.runHead(adapter.streamEvents);
@@ -2496,57 +2641,63 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("restores base permission mode on sendTurn when interactionMode is default", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
+  it.effect.each<{ runtimeMode: RuntimeMode; expectedBase: PermissionMode }>([
+    { runtimeMode: "full-access", expectedBase: "bypassPermissions" },
+    { runtimeMode: "approval-required", expectedBase: "default" },
+    { runtimeMode: "auto-accept-edits", expectedBase: "acceptEdits" },
+  ])(
+    "restores $expectedBase permission mode after plan turn ($runtimeMode)",
+    ({ runtimeMode, expectedBase }) => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
 
-      const session = yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: "claudeAgent",
-        runtimeMode: "full-access",
-      });
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: "claudeAgent",
+          runtimeMode,
+        });
 
-      // First turn in plan mode
-      yield* adapter.sendTurn({
-        threadId: session.threadId,
-        input: "plan this",
-        interactionMode: "plan",
-        attachments: [],
-      });
+        // First turn in plan mode
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "plan this",
+          interactionMode: "plan",
+          attachments: [],
+        });
 
-      // Complete the turn so we can send another
-      const turnCompletedFiber = yield* Stream.filter(
-        adapter.streamEvents,
-        (event) => event.type === "turn.completed",
-      ).pipe(Stream.runHead, Effect.forkChild);
+        // Complete the turn so we can send another
+        const turnCompletedFiber = yield* Stream.filter(
+          adapter.streamEvents,
+          (event) => event.type === "turn.completed",
+        ).pipe(Stream.runHead, Effect.forkChild);
 
-      harness.query.emit({
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        errors: [],
-        session_id: "sdk-session-plan-restore",
-        uuid: "result-plan",
-      } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          errors: [],
+          session_id: `sdk-session-${runtimeMode}`,
+          uuid: `result-${runtimeMode}`,
+        } as unknown as SDKMessage);
 
-      yield* Fiber.join(turnCompletedFiber);
+        yield* Fiber.join(turnCompletedFiber);
 
-      // Second turn back to default
-      yield* adapter.sendTurn({
-        threadId: session.threadId,
-        input: "now do it",
-        interactionMode: "default",
-        attachments: [],
-      });
+        // Second turn back to default
+        yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "now do it",
+          interactionMode: "default",
+          attachments: [],
+        });
 
-      // First call sets "plan", second call restores "bypassPermissions" (the base for full-access)
-      assert.deepEqual(harness.query.setPermissionModeCalls, ["plan", "bypassPermissions"]);
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
+        assert.deepEqual(harness.query.setPermissionModeCalls, ["plan", expectedBase]);
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
 
   it.effect("does not call setPermissionMode when interactionMode is absent", () => {
     const harness = makeHarness();
@@ -2622,7 +2773,7 @@ describe("ClaudeAdapterLive", () => {
       }
       assert.equal(proposedEvent.value.payload.planMarkdown, "# Ship it\n\n- one\n- two");
       assert.deepEqual(proposedEvent.value.providerRefs, {
-        providerItemId: ProviderItemId.makeUnsafe("tool-exit-1"),
+        providerItemId: ProviderItemId.make("tool-exit-1"),
       });
 
       const permissionResult = yield* Effect.promise(() => permissionPromise);
@@ -2700,7 +2851,7 @@ describe("ClaudeAdapterLive", () => {
       }
       assert.equal(proposedEvent.value.payload.planMarkdown, "# Final plan\n\n- capture it");
       assert.deepEqual(proposedEvent.value.providerRefs, {
-        providerItemId: ProviderItemId.makeUnsafe("tool-exit-2"),
+        providerItemId: ProviderItemId.make("tool-exit-2"),
       });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -2791,15 +2942,13 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(requestedEvent.value.payload.questions.length, 1);
       assert.equal(requestedEvent.value.payload.questions[0]?.question, "Which framework?");
       assert.deepEqual(requestedEvent.value.providerRefs, {
-        providerItemId: ProviderItemId.makeUnsafe("tool-ask-1"),
+        providerItemId: ProviderItemId.make("tool-ask-1"),
       });
 
       // Respond with the user's answers.
-      yield* adapter.respondToUserInput(
-        session.threadId,
-        ApprovalRequestId.makeUnsafe(requestId!),
-        { "Which framework?": "React" },
-      );
+      yield* adapter.respondToUserInput(session.threadId, ApprovalRequestId.make(requestId!), {
+        "Which framework?": "React",
+      });
 
       // The adapter should emit a user-input.resolved event.
       const resolvedEvent = yield* Stream.runHead(adapter.streamEvents);
@@ -2815,7 +2964,7 @@ describe("ClaudeAdapterLive", () => {
         "Which framework?": "React",
       });
       assert.deepEqual(resolvedEvent.value.providerRefs, {
-        providerItemId: ProviderItemId.makeUnsafe("tool-ask-1"),
+        providerItemId: ProviderItemId.make("tool-ask-1"),
       });
 
       // The canUseTool promise should resolve with the answers in SDK format.
@@ -2882,11 +3031,9 @@ describe("ClaudeAdapterLive", () => {
       }
       const requestId = requestedEvent.value.requestId;
 
-      yield* adapter.respondToUserInput(
-        session.threadId,
-        ApprovalRequestId.makeUnsafe(requestId!),
-        { "Deploy to which env?": "Staging" },
-      );
+      yield* adapter.respondToUserInput(session.threadId, ApprovalRequestId.make(requestId!), {
+        "Deploy to which env?": "Staging",
+      });
 
       // Drain the resolved event.
       yield* Stream.runHead(adapter.streamEvents);
