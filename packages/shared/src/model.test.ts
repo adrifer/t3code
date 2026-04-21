@@ -50,6 +50,8 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("gpt-5-codex")).toBe("gpt-5.4");
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
+    expect(normalizeModelSlug("opus", "copilot")).toBe("claude-opus-4-7");
+    expect(normalizeModelSlug("claude-opus-4.7", "copilot")).toBe("claude-opus-4-7");
   });
 
   it("returns null for empty or missing values", () => {
@@ -233,6 +235,9 @@ describe("resolveApiModelId", () => {
   it("maps Copilot Claude model slugs to CLI model ids", () => {
     expect(resolveApiModelId({ provider: "copilot", model: "claude-sonnet-4-6" })).toBe(
       "claude-sonnet-4.6",
+    );
+    expect(resolveApiModelId({ provider: "copilot", model: "claude-opus-4-7" })).toBe(
+      "claude-opus-4.7",
     );
     expect(resolveApiModelId({ provider: "copilot", model: "claude-opus-4-6" })).toBe(
       "claude-opus-4.6",

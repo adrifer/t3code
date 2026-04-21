@@ -29,6 +29,7 @@ export const FALLBACK_COPILOT_MODEL_CATALOG: ReadonlyArray<CopilotModelCatalogEn
   { slug: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", premiumRequestMultiplier: "1x" },
   { slug: "claude-sonnet-4", name: "Claude Sonnet 4", premiumRequestMultiplier: "1x" },
   { slug: "claude-haiku-4-5", name: "Claude Haiku 4.5", premiumRequestMultiplier: "0.33x" },
+  { slug: "claude-opus-4-7", name: "Claude Opus 4.7", premiumRequestMultiplier: "7.5x" },
   { slug: "claude-opus-4-6", name: "Claude Opus 4.6", premiumRequestMultiplier: "3x" },
   { slug: "claude-opus-4-5", name: "Claude Opus 4.5", premiumRequestMultiplier: "3x" },
   { slug: "goldeneye", name: "Goldeneye", premiumRequestMultiplier: "1x" },

@@ -9,6 +9,7 @@ describe("parseCopilotModelPickerOutput", () => {
       Search models...
       ❯ Claude Sonnet 4.6                                  1x
         Claude Haiku 4.5                                   0.33x
+        Claude Opus 4.7                                    3x
         Claude Opus 4.6                                    3x
         GPT-5.4 mini                                       0.33x
         GPT-5 mini                                         0x
@@ -26,6 +27,11 @@ describe("parseCopilotModelPickerOutput", () => {
         slug: "claude-haiku-4-5",
         name: "Claude Haiku 4.5",
         premiumRequestMultiplier: "0.33x",
+      },
+      {
+        slug: "claude-opus-4-7",
+        name: "Claude Opus 4.7",
+        premiumRequestMultiplier: "7.5x",
       },
       {
         slug: "claude-opus-4-6",
