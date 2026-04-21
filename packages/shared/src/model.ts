@@ -1,12 +1,14 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
-  type ClaudeCodeEffort,
+  type ClaudeAgentEffort,
   type ClaudeModelOptions,
   type CodexModelOptions,
   type CopilotModelOptions,
+  type CursorModelOptions,
   type ModelCapabilities,
   type ModelSelection,
+  type OpenCodeModelOptions,
   type ProviderKind,
   type ProviderModelOptions,
 } from "@t3tools/contracts";
@@ -27,8 +29,6 @@ const COPILOT_API_MODEL_IDS: Record<string, string> = {
   "claude-opus-4-5": "claude-opus-4.5",
 };
 
-// ── Effort helpers ────────────────────────────────────────────────────
-
 /** Check whether a capabilities object includes a given effort value. */
 export function hasEffortLevel(caps: ModelCapabilities, value: string): boolean {
   return caps.reasoningEffortLevels.some((l) => l.value === value);
@@ -42,12 +42,9 @@ export function getDefaultEffort(caps: ModelCapabilities): string | null {
 /**
  * Resolve a raw effort option against capabilities.
  *
- * Returns the effective effort value — the explicit value if supported and not
- * prompt-injected, otherwise the model's default. Returns `undefined` only
- * when the model has no effort levels at all.
- *
- * Prompt-injected efforts (e.g. "ultrathink") are excluded because they are
- * applied via prompt text, not the effort API parameter.
+ * Returns the explicit supported value when present and not prompt-injected,
+ * otherwise the model default. Returns `undefined` when the model exposes no
+ * effort levels.
  */
 export function resolveEffort(
   caps: ModelCapabilities,
@@ -65,8 +62,6 @@ export function resolveEffort(
   return defaultValue ?? undefined;
 }
 
-// ── Context window helpers ───────────────────────────────────────────
-
 /** Check whether a capabilities object includes a given context window value. */
 export function hasContextWindowOption(caps: ModelCapabilities, value: string): boolean {
   return caps.contextWindowOptions.some((o) => o.value === value);
@@ -80,14 +75,8 @@ export function getDefaultContextWindow(caps: ModelCapabilities): string | null 
 /**
  * Resolve a raw `contextWindow` option against capabilities.
  *
- * Returns the effective context window value — the explicit value if supported,
- * otherwise the model's default. Returns `undefined` only when the model has
- * no context window options at all.
- *
- * Unlike effort levels (where the API has matching defaults), the context
- * window requires an explicit API suffix (e.g. `[1m]`), so we always preserve
- * the resolved value to avoid ambiguity between "user chose the default" and
- * "not specified".
+ * Returns the explicit supported value when present, otherwise the model
+ * default. Returns `undefined` when the model exposes no context window options.
  */
 export function resolveContextWindow(
   caps: ModelCapabilities,
@@ -139,6 +128,74 @@ export function normalizeCopilotModelOptionsWithCapabilities(
     ? { reasoningEffort: reasoningEffort as CopilotModelOptions["reasoningEffort"] }
     : {};
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
+export function normalizeCursorModelOptionsWithCapabilities(
+  caps: ModelCapabilities,
+  modelOptions: CursorModelOptions | null | undefined,
+): CursorModelOptions | undefined {
+  const reasoning = resolveEffort(caps, modelOptions?.reasoning);
+  const thinking = caps.supportsThinkingToggle ? modelOptions?.thinking : undefined;
+  const fastMode = caps.supportsFastMode ? modelOptions?.fastMode : undefined;
+  const contextWindow = resolveContextWindow(caps, modelOptions?.contextWindow);
+  const nextOptions: CursorModelOptions = {
+    ...(reasoning ? { reasoning: reasoning as CursorModelOptions["reasoning"] } : {}),
+    ...(fastMode !== undefined ? { fastMode } : {}),
+    ...(thinking !== undefined ? { thinking } : {}),
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+  };
+  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
+function resolveLabeledOption(
+  options: ReadonlyArray<{ value: string; isDefault?: boolean | undefined }> | undefined,
+  raw: string | null | undefined,
+): string | undefined {
+  if (!options || options.length === 0) {
+    return raw ?? undefined;
+  }
+  if (raw && options.some((option) => option.value === raw)) {
+    return raw;
+  }
+  return options.find((option) => option.isDefault)?.value ?? options[0]?.value;
+}
+
+export function normalizeOpenCodeModelOptionsWithCapabilities(
+  caps: ModelCapabilities,
+  modelOptions: OpenCodeModelOptions | null | undefined,
+): OpenCodeModelOptions | undefined {
+  const variant = resolveLabeledOption(caps.variantOptions, trimOrNull(modelOptions?.variant));
+  const agent = resolveLabeledOption(caps.agentOptions, trimOrNull(modelOptions?.agent));
+  const nextOptions: OpenCodeModelOptions = {
+    ...(variant ? { variant } : {}),
+    ...(agent ? { agent } : {}),
+  };
+  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
+export function normalizeProviderModelOptionsWithCapabilities(
+  provider: ProviderKind,
+  caps: ModelCapabilities,
+  modelOptions: ProviderModelOptions[ProviderKind] | null | undefined,
+): ProviderModelOptions[ProviderKind] | undefined {
+  switch (provider) {
+    case "codex":
+      return normalizeCodexModelOptionsWithCapabilities(caps, modelOptions as CodexModelOptions);
+    case "copilot":
+      return normalizeCopilotModelOptionsWithCapabilities(
+        caps,
+        modelOptions as CopilotModelOptions,
+      );
+    case "claudeAgent":
+      return normalizeClaudeModelOptionsWithCapabilities(caps, modelOptions as ClaudeModelOptions);
+    case "cursor":
+      return normalizeCursorModelOptionsWithCapabilities(caps, modelOptions as CursorModelOptions);
+    case "opencode":
+      return normalizeOpenCodeModelOptionsWithCapabilities(
+        caps,
+        modelOptions as OpenCodeModelOptions,
+      );
+  }
 }
 
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
@@ -198,7 +255,7 @@ export function resolveSelectableModel(
   return resolved ? resolved.slug : null;
 }
 
-export function resolveModelSlug(model: string | null | undefined, provider: ProviderKind): string {
+function resolveModelSlug(model: string | null | undefined, provider: ProviderKind): string {
   const normalized = normalizeModelSlug(model, provider);
   if (!normalized) {
     return DEFAULT_MODEL_BY_PROVIDER[provider];
@@ -211,6 +268,13 @@ export function resolveModelSlugForProvider(
   model: string | null | undefined,
 ): string {
   return resolveModelSlug(model, provider);
+}
+
+/** Trim a string, returning null for empty/missing values. */
+export function trimOrNull<T extends string>(value: T | null | undefined): T | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim() as T;
+  return trimmed || null;
 }
 
 export function makeModelSelection(
@@ -231,14 +295,15 @@ export function makeModelSelection(
       return options
         ? { provider, model, options: options as ClaudeModelOptions }
         : { provider, model };
+    case "cursor":
+      return options
+        ? { provider, model, options: options as CursorModelOptions }
+        : { provider, model };
+    case "opencode":
+      return options
+        ? { provider, model, options: options as OpenCodeModelOptions }
+        : { provider, model };
   }
-}
-
-/** Trim a string, returning null for empty/missing values. */
-export function trimOrNull<T extends string>(value: T | null | undefined): T | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim() as T;
-  return trimmed || null;
 }
 
 /**
@@ -248,9 +313,6 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
  * to whatever the API requires — a model-id suffix, a separate parameter, etc.
  * The canonical slug stored in the selection stays unchanged so the
  * capabilities system keeps working.
- *
- * Expects `contextWindow` to already be resolved (via `resolveContextWindow`)
- * to the effective value, not stripped to `undefined` for defaults.
  */
 export function resolveApiModelId(modelSelection: ModelSelection): string {
   switch (modelSelection.provider) {
@@ -264,15 +326,53 @@ export function resolveApiModelId(modelSelection: ModelSelection): string {
     }
     case "copilot":
       return COPILOT_API_MODEL_IDS[modelSelection.model] ?? modelSelection.model;
-    default: {
+    default:
       return modelSelection.model;
-    }
+  }
+}
+
+export function createModelSelection(
+  provider: ProviderKind,
+  model: string,
+  options?: ProviderModelOptions[ProviderKind] | undefined,
+): ModelSelection {
+  switch (provider) {
+    case "codex":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as CodexModelOptions } : {}),
+      };
+    case "copilot":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as CopilotModelOptions } : {}),
+      };
+    case "claudeAgent":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as ClaudeModelOptions } : {}),
+      };
+    case "cursor":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as CursorModelOptions } : {}),
+      };
+    case "opencode":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as OpenCodeModelOptions } : {}),
+      };
   }
 }
 
 export function applyClaudePromptEffortPrefix(
   text: string,
-  effort: ClaudeCodeEffort | null | undefined,
+  effort: ClaudeAgentEffort | null | undefined,
 ): string {
   const trimmed = text.trim();
   if (!trimmed) {

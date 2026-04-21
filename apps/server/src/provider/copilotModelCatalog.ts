@@ -1,8 +1,9 @@
+import type { PtyExitEvent } from "../terminal/Services/PTY.ts";
 import type { CopilotSettings } from "@t3tools/contracts";
 import { Effect } from "effect";
 
-import { PtyAdapter } from "../terminal/Services/PTY";
-import { resolveCommandExecution } from "../wsl";
+import { PtyAdapter } from "../terminal/Services/PTY.ts";
+import { resolveCommandExecution } from "../wsl.ts";
 
 export interface CopilotModelCatalogEntry {
   readonly slug: string;
@@ -212,12 +213,12 @@ export const probeCopilotModelCatalog = Effect.fn("probeCopilotModelCatalog")(fu
           }
         };
 
-        const unsubscribeData = spawned.onData((chunk) => {
+        const unsubscribeData = spawned.onData((chunk: string) => {
           output += chunk;
           maybeFinishFromOutput();
         });
 
-        const unsubscribeExit = spawned.onExit((event) => {
+        const unsubscribeExit = spawned.onExit((event: PtyExitEvent) => {
           const parsed = parseCopilotModelPickerOutput(output);
           if (parsed.length > 0) {
             finish(() => resolve(parsed));

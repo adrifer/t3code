@@ -124,8 +124,10 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
       activePlan={false}
       interactionMode="default"
       provider={provider}
+      planSidebarLabel="Plan"
       planSidebarOpen={false}
       runtimeMode="approval-required"
+      showInteractionModeToggle
       traitsMenuContent={
         <TraitsMenuContent
           provider={provider}
@@ -210,18 +212,6 @@ describe("CompactComposerControlsMenu", () => {
     });
   });
 
-  it("shows autopilot in the mode menu for Copilot", async () => {
-    await using _ = await mountMenu({
-      modelSelection: { provider: "copilot", model: "gpt-5.4" },
-    });
-
-    await page.getByLabelText("More composer controls").click();
-
-    await vi.waitFor(() => {
-      expect(document.body.textContent ?? "").toContain("Autopilot");
-    });
-  });
-
   it("shows a Claude thinking on/off section for Haiku", async () => {
     await using _ = await mountMenu({
       modelSelection: {
@@ -278,5 +268,40 @@ describe("CompactComposerControlsMenu", () => {
         'Your prompt contains "ultrathink" in the text. Remove it to change effort.',
       );
     });
+  });
+
+  it("can hide the interaction mode section", async () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const screen = await render(
+      <CompactComposerControlsMenu
+        activePlan={false}
+        interactionMode="default"
+        provider="claudeAgent"
+        planSidebarLabel="Plan"
+        planSidebarOpen={false}
+        runtimeMode="approval-required"
+        showInteractionModeToggle={false}
+        onInteractionModeChange={vi.fn()}
+        onTogglePlanSidebar={vi.fn()}
+        onRuntimeModeChange={vi.fn()}
+      />,
+      { container: host },
+    );
+
+    await page.getByLabelText("More composer controls").click();
+
+    await vi.waitFor(() => {
+      const text = document.body.textContent ?? "";
+      expect(text).not.toContain("Mode");
+      expect(text).not.toContain("Chat");
+      expect(text).not.toContain("Plan");
+      expect(text).toContain("Access");
+      expect(text).toContain("Supervised");
+      expect(text).toContain("Full access");
+    });
+
+    await screen.unmount();
+    host.remove();
   });
 });

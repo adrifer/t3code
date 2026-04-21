@@ -2,8 +2,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { DEFAULT_SERVER_SETTINGS, ServerSettingsPatch } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Schema } from "effect";
-import { ServerConfig } from "./config";
-import { ServerSettingsLive, ServerSettingsService } from "./serverSettings";
+import { ServerConfig } from "./config.ts";
+import { ServerSettingsLive, ServerSettingsService } from "./serverSettings.ts";
 
 const makeServerSettingsLayer = () =>
   ServerSettingsLive.pipe(
@@ -92,6 +92,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         enabled: true,
         binaryPath: "/usr/local/bin/claude",
         customModels: ["claude-custom"],
+        launchArgs: "",
       });
       assert.deepEqual(next.textGenerationModelSelection, {
         provider: "codex",
@@ -141,6 +142,35 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("drops stale text generation options when resetting model selection", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      yield* serverSettings.updateSettings({
+        textGenerationModelSelection: {
+          provider: "codex",
+          model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
+          options: {
+            reasoningEffort: "high",
+            fastMode: true,
+          },
+        },
+      });
+
+      const next = yield* serverSettings.updateSettings({
+        textGenerationModelSelection: {
+          provider: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.provider,
+          model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
+        },
+      });
+
+      assert.deepEqual(next.textGenerationModelSelection, {
+        provider: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.provider,
+        model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("trims provider path settings when updates are applied", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
@@ -154,6 +184,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           claudeAgent: {
             binaryPath: "  /opt/homebrew/bin/claude  ",
           },
+          opencode: {
+            binaryPath: "  /opt/homebrew/bin/opencode  ",
+            serverUrl: "  http://127.0.0.1:4096  ",
+            serverPassword: "  secret-password  ",
+          },
         },
       });
 
@@ -166,6 +201,14 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
         binaryPath: "/opt/homebrew/bin/claude",
+        customModels: [],
+        launchArgs: "",
+      });
+      assert.deepEqual(next.providers.opencode, {
+        enabled: true,
+        binaryPath: "/opt/homebrew/bin/opencode",
+        serverUrl: "http://127.0.0.1:4096",
+        serverPassword: "secret-password",
         customModels: [],
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
@@ -199,12 +242,14 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const serverSettings = yield* ServerSettingsService;
 
       const next = yield* serverSettings.updateSettings({
+        addProjectBaseDirectory: "  ~/Development  ",
         observability: {
           otlpTracesUrl: "  http://localhost:4318/v1/traces  ",
           otlpMetricsUrl: "  http://localhost:4318/v1/metrics  ",
         },
       });
 
+      assert.equal(next.addProjectBaseDirectory, "~/Development");
       assert.deepEqual(next.observability, {
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
@@ -238,6 +283,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const serverConfig = yield* ServerConfig;
       const fileSystem = yield* FileSystem.FileSystem;
       const next = yield* serverSettings.updateSettings({
+        addProjectBaseDirectory: "~/Development",
         observability: {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
@@ -246,6 +292,10 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",
           },
+          opencode: {
+            serverUrl: "http://127.0.0.1:4096",
+            serverPassword: "secret-password",
+          },
         },
       });
 
@@ -253,6 +303,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
       assert.deepEqual(JSON.parse(raw), {
+        addProjectBaseDirectory: "~/Development",
         observability: {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
@@ -260,6 +311,10 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         providers: {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",
+          },
+          opencode: {
+            serverUrl: "http://127.0.0.1:4096",
+            serverPassword: "secret-password",
           },
         },
       });

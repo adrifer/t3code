@@ -1240,7 +1240,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
   return {
     provider: PROVIDER,
     capabilities: {
-      sessionModelSwitch: "restart-session",
+      sessionModelSwitch: "unsupported",
     },
     startSession,
     sendTurn,

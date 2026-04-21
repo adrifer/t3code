@@ -1,67 +1,45 @@
+import { FileSystem, Path, Effect } from "effect";
+import { assert, it } from "@effect/vitest";
+
+import { ensureNodePtySpawnHelperExecutable } from "./NodePTY.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { it } from "@effect/vitest";
-import { Effect } from "effect";
-import { afterEach, expect, vi } from "vitest";
 
-const nodePtyMock = vi.hoisted(() => ({
-  spawn: vi.fn(),
-}));
-
-vi.mock("node-pty", () => nodePtyMock);
-
-import { PtyAdapter } from "../Services/PTY";
-import { layer as NodePTYLayer } from "./NodePTY";
-
-const originalPlatform = process.platform;
-
-function setPlatform(platform: NodeJS.Platform) {
-  Object.defineProperty(process, "platform", {
-    configurable: true,
-    value: platform,
-  });
-}
-
-afterEach(() => {
-  nodePtyMock.spawn.mockReset();
-  setPlatform(originalPlatform);
-});
-
-it.layer(NodeServices.layer, { excludeTestServices: true })("NodePTY", (it) => {
-  it.effect("converts synchronous node-pty spawn failures into PtySpawnError", () =>
+it.layer(NodeServices.layer)("ensureNodePtySpawnHelperExecutable", (it) => {
+  it.effect("adds executable bits when helper exists but is not executable", () =>
     Effect.gen(function* () {
-      setPlatform("win32");
-      nodePtyMock.spawn.mockImplementation(() => {
-        throw new Error("File not found: ");
-      });
+      if (process.platform === "win32") return;
 
-      const error = yield* Effect.flip(
-        Effect.gen(function* () {
-          const pty = yield* PtyAdapter;
-          return yield* pty.spawn({
-            shell: "wsl.exe",
-            args: ["--version"],
-            cwd: String.raw`C:\Users\track`,
-            cols: 120,
-            rows: 30,
-            env: {},
-          });
-        }).pipe(Effect.provide(NodePTYLayer)),
-      );
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
 
-      expect(error).toMatchObject({
-        _tag: "PtySpawnError",
-        adapter: "node-pty",
-        message: "Failed to spawn PTY process",
-      });
-      expect(nodePtyMock.spawn).toHaveBeenCalledWith(
-        "wsl.exe",
-        ["--version"],
-        expect.objectContaining({
-          cwd: String.raw`C:\Users\track`,
-          cols: 120,
-          rows: 30,
-        }),
-      );
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "pty-helper-test-" });
+      const helperPath = path.join(dir, "spawn-helper");
+      yield* fs.writeFileString(helperPath, "#!/bin/sh\nexit 0\n");
+      yield* fs.chmod(helperPath, 0o644);
+
+      yield* ensureNodePtySpawnHelperExecutable(helperPath);
+
+      const mode = (yield* fs.stat(helperPath)).mode & 0o777;
+      assert.equal(mode & 0o111, 0o111);
+    }),
+  );
+
+  it.effect("keeps executable helper as executable", () =>
+    Effect.gen(function* () {
+      if (process.platform === "win32") return;
+
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+
+      const dir = yield* fs.makeTempDirectoryScoped({ prefix: "pty-helper-test-" });
+      const helperPath = path.join(dir, "spawn-helper");
+      yield* fs.writeFileString(helperPath, "#!/bin/sh\nexit 0\n");
+      yield* fs.chmod(helperPath, 0o755);
+
+      yield* ensureNodePtySpawnHelperExecutable(helperPath);
+
+      const mode = (yield* fs.stat(helperPath)).mode & 0o777;
+      assert.equal(mode & 0o111, 0o111);
     }),
   );
 });

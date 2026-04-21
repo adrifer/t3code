@@ -17,18 +17,18 @@ import {
   parseGenericCliVersion,
   providerModelsFromSettings,
   spawnAndCollect,
-} from "../providerSnapshot";
-import { makeManagedServerProvider } from "../makeManagedServerProvider";
-import { CopilotProvider } from "../Services/CopilotProvider";
+} from "../providerSnapshot.ts";
+import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { CopilotProvider } from "../Services/CopilotProvider.ts";
 import {
   FALLBACK_COPILOT_MODEL_CATALOG,
   probeCopilotModelCatalog,
   type CopilotModelCatalogEntry,
   type CopilotModelCatalogProbeSettings,
-} from "../copilotModelCatalog";
-import { ServerSettingsService } from "../../serverSettings";
+} from "../copilotModelCatalog.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { ServerSettingsError } from "@t3tools/contracts";
-import { PtyAdapter } from "../../terminal/Services/PTY";
+import { PtyAdapter } from "../../terminal/Services/PTY.ts";
 import { resolveCommandExecution } from "../../wsl.ts";
 
 const PROVIDER = "copilot" as const;
@@ -95,6 +95,46 @@ function providerModelsFromCatalog(
   catalog: ReadonlyArray<CopilotModelCatalogEntry> | null | undefined,
 ): ReadonlyArray<ServerProviderModel> {
   return catalog && catalog.length > 0 ? catalog.map(buildCopilotProviderModel) : BUILT_IN_MODELS;
+}
+
+function createInitialCopilotProviderSnapshot(settings: CopilotSettings) {
+  const checkedAt = new Date().toISOString();
+  const models = providerModelsFromSettings(
+    BUILT_IN_MODELS,
+    PROVIDER,
+    settings.customModels,
+    COPILOT_DEFAULT_MODEL_CAPABILITIES,
+  );
+
+  if (!settings.enabled) {
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: false,
+      checkedAt,
+      models,
+      probe: {
+        installed: false,
+        version: null,
+        status: "warning",
+        auth: { status: "unknown" },
+        message: "GitHub Copilot is disabled in T3 Code settings.",
+      },
+    });
+  }
+
+  return buildServerProvider({
+    provider: PROVIDER,
+    enabled: true,
+    checkedAt,
+    models,
+    probe: {
+      installed: true,
+      version: null,
+      status: "warning",
+      auth: { status: "unknown" },
+      message: "Checking GitHub Copilot CLI availability...",
+    },
+  });
 }
 
 function copilotVersionCommand(settings: CopilotSettings) {
@@ -346,10 +386,11 @@ export const CopilotProviderLive = Layer.effect(
       lookup: (key: string) => {
         const settings = JSON.parse(key) as CopilotModelCatalogProbeSettings;
         return Option.match(ptyOption, {
-          onSome: () =>
+          onSome: (pty) =>
             probeCopilotModelCatalog(settings).pipe(
+              Effect.provideService(PtyAdapter, pty),
               Effect.timeoutOption("8 seconds"),
-              Effect.map(Option.getOrNull),
+              Effect.map((option) => (Option.isSome(option) ? option.value : null)),
               Effect.catch(() => Effect.succeed(null)),
             ),
           onNone: () => Effect.succeed(null),
@@ -372,6 +413,7 @@ export const CopilotProviderLive = Layer.effect(
         Stream.map((settings) => settings.providers.copilot),
       ),
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
+      initialSnapshot: createInitialCopilotProviderSnapshot,
       checkProvider,
     });
   }),

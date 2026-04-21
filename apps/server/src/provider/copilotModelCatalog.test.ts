@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseCopilotModelPickerOutput } from "./copilotModelCatalog";
+import { parseCopilotModelPickerOutput } from "./copilotModelCatalog.ts";
 
 describe("parseCopilotModelPickerOutput", () => {
   it("parses available Copilot models and premium request multipliers", () => {

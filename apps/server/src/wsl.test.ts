@@ -7,7 +7,7 @@ import {
   resolveWslTerminalShell,
   toWslPath,
   translatePathForExecution,
-} from "./wsl";
+} from "./wsl.ts";
 
 const originalPlatform = process.platform;
 

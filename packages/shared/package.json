@@ -36,6 +36,10 @@
       "types": "./src/schemaJson.ts",
       "import": "./src/schemaJson.ts"
     },
+    "./toolActivity": {
+      "types": "./src/toolActivity.ts",
+      "import": "./src/toolActivity.ts"
+    },
     "./Struct": {
       "types": "./src/Struct.ts",
       "import": "./src/Struct.ts"
@@ -59,6 +63,14 @@
     "./qrCode": {
       "types": "./src/qrCode.ts",
       "import": "./src/qrCode.ts"
+    },
+    "./cliArgs": {
+      "types": "./src/cliArgs.ts",
+      "import": "./src/cliArgs.ts"
+    },
+    "./path": {
+      "types": "./src/path.ts",
+      "import": "./src/path.ts"
     }
   },
   "scripts": {

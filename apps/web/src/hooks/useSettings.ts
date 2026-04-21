@@ -10,8 +10,9 @@
  * store.
  */
 import { useCallback, useMemo, useSyncExternalStore } from "react";
-import { ServerSettings, ServerSettingsPatch } from "@t3tools/contracts";
+import { ServerSettings, type ServerSettingsPatch } from "@t3tools/contracts";
 import {
+  type ClientSettingsPatch,
   type ClientSettings,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
@@ -19,7 +20,7 @@ import {
 } from "@t3tools/contracts/settings";
 import { ensureLocalApi } from "~/localApi";
 import { Struct } from "effect";
-import { deepMerge } from "@t3tools/shared/Struct";
+import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import { applySettingsUpdated, getServerConfig, useServerSettings } from "~/rpc/serverState";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
@@ -64,7 +65,7 @@ async function hydrateClientSettings(): Promise<void> {
     try {
       const persistedSettings = await ensureLocalApi().persistence.getClientSettings();
       if (persistedSettings) {
-        replaceClientSettingsSnapshot(persistedSettings);
+        replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
       }
     } catch (error) {
       console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} hydrate failed`, error);
@@ -98,7 +99,7 @@ const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettings.fields))
 
 function splitPatch(patch: Partial<UnifiedSettings>): {
   serverPatch: ServerSettingsPatch;
-  clientPatch: Partial<ClientSettings>;
+  clientPatch: ClientSettingsPatch;
 } {
   const serverPatch: Record<string, unknown> = {};
   const clientPatch: Record<string, unknown> = {};
@@ -111,7 +112,7 @@ function splitPatch(patch: Partial<UnifiedSettings>): {
   }
   return {
     serverPatch: serverPatch as ServerSettingsPatch,
-    clientPatch: clientPatch as Partial<ClientSettings>,
+    clientPatch: clientPatch as ClientSettingsPatch,
   };
 }
 
@@ -121,6 +122,15 @@ function splitPatch(patch: Partial<UnifiedSettings>): {
  * Read merged settings. Selector narrows the subscription so components
  * only re-render when the slice they care about changes.
  */
+
+/**
+ * Non-hook accessor for the current merged client settings snapshot.
+ * Used by non-React code paths (e.g. runtime services) that need the latest
+ * settings without subscribing.
+ */
+export function getClientSettings(): ClientSettings {
+  return getClientSettingsSnapshot();
+}
 
 export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings) => T): T {
   const serverSettings = useServerSettings();
@@ -154,7 +164,7 @@ export function useUpdateSettings() {
     if (Object.keys(serverPatch).length > 0) {
       const currentServerConfig = getServerConfig();
       if (currentServerConfig) {
-        applySettingsUpdated(deepMerge(currentServerConfig.settings, serverPatch));
+        applySettingsUpdated(applyServerSettingsPatch(currentServerConfig.settings, serverPatch));
       }
       // Fire-and-forget RPC — push will reconcile on success
       void ensureLocalApi().server.updateSettings(serverPatch);

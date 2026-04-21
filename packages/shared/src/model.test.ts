@@ -14,11 +14,10 @@ import {
   resolveApiModelId,
   resolveContextWindow,
   resolveEffort,
-  resolveModelSlug,
   resolveModelSlugForProvider,
   resolveSelectableModel,
   trimOrNull,
-} from "./model";
+} from "./model.ts";
 
 const codexCaps: ModelCapabilities = {
   reasoningEffortLevels: [
@@ -61,17 +60,18 @@ describe("normalizeModelSlug", () => {
   });
 });
 
-describe("resolveModelSlug", () => {
+describe("resolveModelSlugForProvider", () => {
   it("returns defaults when the model is missing", () => {
-    expect(resolveModelSlug(undefined, "codex")).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
-
+    expect(resolveModelSlugForProvider("codex", undefined)).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
     expect(resolveModelSlugForProvider("claudeAgent", undefined)).toBe(
       DEFAULT_MODEL_BY_PROVIDER.claudeAgent,
     );
   });
 
   it("preserves normalized unknown models", () => {
-    expect(resolveModelSlug("custom/internal-model", "codex")).toBe("custom/internal-model");
+    expect(resolveModelSlugForProvider("codex", "custom/internal-model")).toBe(
+      "custom/internal-model",
+    );
   });
 });
 
@@ -137,6 +137,7 @@ describe("resolveEffort", () => {
 
 describe("misc helpers", () => {
   it("detects ultrathink prompts", () => {
+    expect(isClaudeUltrathinkPrompt("Please ultrathink about this")).toBe(true);
     expect(isClaudeUltrathinkPrompt("Ultrathink:\nInvestigate")).toBe(true);
     expect(isClaudeUltrathinkPrompt("Investigate")).toBe(false);
   });

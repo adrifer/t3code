@@ -1,5 +1,5 @@
 import { type ChildProcess as ChildProcessHandle, spawn, spawnSync } from "node:child_process";
-import { resolveCommandExecution, type CommandExecutionInput } from "./wsl";
+import { resolveCommandExecution, type CommandExecutionInput } from "./wsl.ts";
 
 export interface ProcessRunOptions {
   cwd?: string | undefined;

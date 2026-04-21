@@ -221,30 +221,22 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
   const linePrefix = text.slice(lineStart, cursor);
 
   if (linePrefix.startsWith("/")) {
-    const commandMatch = /^\/(\S*)$/.exec(linePrefix);
-    if (commandMatch) {
-      const commandQuery = commandMatch[1] ?? "";
-      if (commandQuery.toLowerCase() === "model") {
-        return {
-          kind: "slash-model",
-          query: "",
-          rangeStart: lineStart,
-          rangeEnd: cursor,
-        };
-      }
-      return {
-        kind: "slash-command",
-        query: commandQuery,
-        rangeStart: lineStart,
-        rangeEnd: cursor,
-      };
-    }
-
     const modelMatch = /^\/model(?:\s+(.*))?$/.exec(linePrefix);
     if (modelMatch) {
       return {
         kind: "slash-model",
         query: (modelMatch[1] ?? "").trim(),
+        rangeStart: lineStart,
+        rangeEnd: cursor,
+      };
+    }
+
+    const commandMatch = /^\/(\S*)$/.exec(linePrefix);
+    if (commandMatch) {
+      const commandQuery = commandMatch[1] ?? "";
+      return {
+        kind: "slash-command",
+        query: commandQuery,
         rangeStart: lineStart,
         rangeEnd: cursor,
       };

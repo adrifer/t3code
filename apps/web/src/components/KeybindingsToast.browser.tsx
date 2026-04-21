@@ -99,7 +99,15 @@ function createBaseServerConfig(): ServerConfig {
       providers: {
         codex: { enabled: true, binaryPath: "", homePath: "", customModels: [] },
         copilot: { enabled: true, binaryPath: "", useWsl: false, wslDistro: "", customModels: [] },
-        claudeAgent: { enabled: true, binaryPath: "", customModels: [] },
+        claudeAgent: { enabled: true, binaryPath: "", customModels: [], launchArgs: "" },
+        cursor: { enabled: true, binaryPath: "", apiEndpoint: "", customModels: [] },
+        opencode: {
+          enabled: true,
+          binaryPath: "",
+          serverUrl: "",
+          serverPassword: "",
+          customModels: [],
+        },
       },
     },
   };

@@ -1,13 +1,13 @@
 import { createRequire } from "node:module";
 
 import { Effect, FileSystem, Layer, Path } from "effect";
+import { PtyAdapter } from "../Services/PTY.ts";
 import {
-  PtyAdapter,
-  PtyAdapterShape,
-  PtyExitEvent,
-  PtyProcess,
   PtySpawnError,
-} from "../Services/PTY";
+  type PtyAdapterShape,
+  type PtyExitEvent,
+  type PtyProcess,
+} from "../Services/PTY.ts";
 
 let didEnsureSpawnHelperExecutable = false;
 
@@ -52,7 +52,11 @@ export const ensureNodePtySpawnHelperExecutable = Effect.fn(function* (explicitP
 });
 
 class NodePtyProcess implements PtyProcess {
-  constructor(private readonly process: import("node-pty").IPty) {}
+  private readonly process: import("node-pty").IPty;
+
+  constructor(process: import("node-pty").IPty) {
+    this.process = process;
+  }
 
   get pid(): number {
     return this.process.pid;
@@ -121,7 +125,7 @@ export const layer = Layer.effect(
           catch: (cause) =>
             new PtySpawnError({
               adapter: "node-pty",
-              message: "Failed to spawn PTY process",
+              message: cause instanceof Error ? cause.message : "Failed to spawn PTY process",
               cause,
             }),
         });

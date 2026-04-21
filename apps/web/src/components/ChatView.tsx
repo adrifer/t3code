@@ -1,7 +1,7 @@
 import {
   type ApprovalRequestId,
   DEFAULT_MODEL_BY_PROVIDER,
-  type ClaudeCodeEffort,
+  type ClaudeAgentEffort,
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
@@ -10,6 +10,7 @@ import {
   type ProjectId,
   type ProviderApprovalDecision,
   type ServerProvider,
+  type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
@@ -25,7 +26,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime";
-import { applyClaudePromptEffortPrefix, makeModelSelection } from "@t3tools/shared/model";
+import { applyClaudePromptEffortPrefix, createModelSelection } from "@t3tools/shared/model";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
@@ -79,10 +80,6 @@ import {
   resolvePlanFollowUpSubmission,
 } from "../proposedPlan";
 import {
-  getInteractionModesForProvider,
-  normalizeInteractionModeForProvider,
-} from "../interactionModes";
-import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   DEFAULT_THREAD_TERMINAL_ID,
@@ -96,13 +93,15 @@ import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
+import { useMediaQuery } from "../hooks/useMediaQuery";
+import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { ChevronDownIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
-import { toastManager } from "./ui/toast";
+import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
 import { type NewProjectScriptInput } from "./ProjectScriptsControl";
 import {
@@ -115,7 +114,7 @@ import { getProviderModelCapabilities, resolveSelectableProvider } from "../prov
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { deriveLogicalProjectKey } from "../logicalProject";
+import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
@@ -175,6 +174,7 @@ import {
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
+import { RightPanelSheet } from "./RightPanelSheet";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -307,7 +307,7 @@ function formatOutgoingPrompt(params: {
 }): string {
   const caps = getProviderModelCapabilities(params.models, params.model, params.provider);
   if (params.effort && caps.promptInjectedEffortLevels.includes(params.effort)) {
-    return applyClaudePromptEffortPrefix(params.text, params.effort as ClaudeCodeEffort | null);
+    return applyClaudePromptEffortPrefix(params.text, params.effort as ClaudeAgentEffort | null);
   }
   return params.text;
 }
@@ -416,6 +416,7 @@ interface PersistentThreadTerminalDrawerProps {
   splitShortcutLabel: string | undefined;
   newShortcutLabel: string | undefined;
   closeShortcutLabel: string | undefined;
+  keybindings: ResolvedKeybindingsConfig;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
 }
 
@@ -428,6 +429,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   splitShortcutLabel,
   newShortcutLabel,
   closeShortcutLabel,
+  keybindings,
   onAddTerminalContext,
 }: PersistentThreadTerminalDrawerProps) {
   const serverThread = useStore(useMemo(() => createThreadSelectorByRef(threadRef), [threadRef]));
@@ -571,6 +573,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
         splitShortcutLabel={visible ? splitShortcutLabel : undefined}
         newShortcutLabel={visible ? newShortcutLabel : undefined}
         closeShortcutLabel={visible ? closeShortcutLabel : undefined}
+        keybindings={keybindings}
         onActiveTerminalChange={activateTerminal}
         onCloseTerminal={closeTerminal}
         onHeightChange={setTerminalHeight}
@@ -679,6 +682,7 @@ export default function ChatView(props: ChatViewProps) {
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -782,7 +786,7 @@ export default function ChatView(props: ChatViewProps) {
   const isServerThread = routeKind === "server" && serverThread !== undefined;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
-  const storedInteractionMode =
+  const interactionMode =
     composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
@@ -847,10 +851,16 @@ export default function ChatView(props: ChatViewProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const savedEnvironmentRegistry = useSavedEnvironmentRegistryStore((s) => s.byId);
   const savedEnvironmentRuntimeById = useSavedEnvironmentRuntimeStore((s) => s.byId);
+  const projectGroupingSettings = useSettings((settings) => ({
+    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
+    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
+  }));
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
-    const logicalKey = deriveLogicalProjectKey(activeProject);
-    const memberProjects = allProjects.filter((p) => deriveLogicalProjectKey(p) === logicalKey);
+    const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
+    const memberProjects = allProjects.filter(
+      (p) => deriveLogicalProjectKeyFromSettings(p, projectGroupingSettings) === logicalKey,
+    );
     const seen = new Set<string>();
     const envs: Array<{
       environmentId: EnvironmentId;
@@ -886,6 +896,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [
     activeProject,
     allProjects,
+    projectGroupingSettings,
     primaryEnvironmentId,
     savedEnvironmentRegistry,
     savedEnvironmentRuntimeById,
@@ -915,7 +926,10 @@ export default function ChatView(props: ChatViewProps) {
         throw new Error("No active project is available for this pull request.");
       }
       const activeProjectRef = scopeProjectRef(activeProject.environmentId, activeProject.id);
-      const logicalProjectKey = deriveLogicalProjectKey(activeProject);
+      const logicalProjectKey = deriveLogicalProjectKeyFromSettings(
+        activeProject,
+        projectGroupingSettings,
+      );
       const storedDraftSession = getDraftSessionByLogicalProjectKey(logicalProjectKey);
       if (storedDraftSession) {
         setDraftThreadContext(storedDraftSession.draftId, input);
@@ -976,6 +990,7 @@ export default function ChatView(props: ChatViewProps) {
       getDraftSessionByLogicalProjectKey,
       isServerThread,
       navigate,
+      projectGroupingSettings,
       routeKind,
       setDraftThreadContext,
       setLogicalProjectDraftThreadId,
@@ -1037,10 +1052,6 @@ export default function ChatView(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? "codex",
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
-  const interactionMode = normalizeInteractionModeForProvider(
-    selectedProvider,
-    storedInteractionMode,
-  );
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
@@ -1115,6 +1126,7 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -1545,18 +1557,15 @@ export default function ChatView(props: ChatViewProps) {
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
-  }, [composerRef.current]);
+  }, []);
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
     });
   }, [focusComposer]);
-  const addTerminalContextToDraft = useCallback(
-    (selection: TerminalContextSelection) => {
-      composerRef.current?.addTerminalContext(selection);
-    },
-    [composerRef.current],
-  );
+  const addTerminalContextToDraft = useCallback((selection: TerminalContextSelection) => {
+    composerRef.current?.addTerminalContext(selection);
+  }, []);
   const setTerminalOpen = useCallback(
     (open: boolean) => {
       if (!activeThreadRef) return;
@@ -1846,11 +1855,13 @@ export default function ChatView(props: ChatViewProps) {
           title: `Deleted action "${deletedName ?? "Unknown"}"`,
         });
       } catch (error) {
-        toastManager.add({
-          type: "error",
-          title: "Could not delete action",
-          description: error instanceof Error ? error.message : "An unexpected error occurred.",
-        });
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not delete action",
+            description: error instanceof Error ? error.message : "An unexpected error occurred.",
+          }),
+        );
       }
     },
     [activeProject, persistProjectScripts],
@@ -1877,11 +1888,10 @@ export default function ChatView(props: ChatViewProps) {
 
   const handleInteractionModeChange = useCallback(
     (mode: ProviderInteractionMode) => {
-      const nextMode = normalizeInteractionModeForProvider(selectedProvider, mode);
-      if (nextMode === interactionMode) return;
-      setComposerDraftInteractionMode(composerDraftTarget, nextMode);
+      if (mode === interactionMode) return;
+      setComposerDraftInteractionMode(composerDraftTarget, mode);
       if (isLocalDraftThread) {
-        setDraftThreadContext(composerDraftTarget, { interactionMode: nextMode });
+        setDraftThreadContext(composerDraftTarget, { interactionMode: mode });
       }
       scheduleComposerFocus();
     },
@@ -1889,32 +1899,29 @@ export default function ChatView(props: ChatViewProps) {
       interactionMode,
       isLocalDraftThread,
       scheduleComposerFocus,
-      selectedProvider,
       composerDraftTarget,
       setComposerDraftInteractionMode,
       setDraftThreadContext,
     ],
   );
-  const cycleInteractionMode = useCallback(() => {
-    const modes = getInteractionModesForProvider(selectedProvider);
-    const currentIndex = modes.indexOf(interactionMode);
-    const nextMode = modes[(currentIndex + 1 + modes.length) % modes.length];
-    if (nextMode) {
-      handleInteractionModeChange(nextMode);
-    }
-  }, [handleInteractionModeChange, interactionMode, selectedProvider]);
+  const toggleInteractionMode = useCallback(() => {
+    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
+  }, [handleInteractionModeChange, interactionMode]);
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
-        const turnKey = activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? null;
-        if (turnKey) {
-          planSidebarDismissedForTurnRef.current = turnKey;
-        }
+        planSidebarDismissedForTurnRef.current =
+          activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
       } else {
         planSidebarDismissedForTurnRef.current = null;
       }
       return !open;
     });
+  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+  const closePlanSidebar = useCallback(() => {
+    setPlanSidebarOpen(false);
+    planSidebarDismissedForTurnRef.current =
+      activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
   }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
 
   const persistThreadSettingsForNextTurn = useCallback(
@@ -2006,6 +2013,18 @@ export default function ChatView(props: ChatViewProps) {
     }
     planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id]);
+
+  // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
+  // Don't auto-open for plans carried over from a previous turn (the user can open manually).
+  useEffect(() => {
+    if (!activePlan) return;
+    if (planSidebarOpen) return;
+    const latestTurnId = activeLatestTurn?.turnId ?? null;
+    if (latestTurnId && activePlan.turnId !== latestTurnId) return;
+    const turnKey = activePlan.turnId ?? sidebarProposedPlan?.turnId ?? "__dismissed__";
+    if (planSidebarDismissedForTurnRef.current === turnKey) return;
+    setPlanSidebarOpen(true);
+  }, [activePlan, activeLatestTurn?.turnId, planSidebarOpen, sidebarProposedPlan?.turnId]);
 
   useEffect(() => {
     setIsRevertingCheckpoint(false);
@@ -2216,6 +2235,7 @@ export default function ChatView(props: ChatViewProps) {
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
+        modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
@@ -2265,6 +2285,13 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "modelPicker.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        composerRef.current?.toggleModelPicker();
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2273,8 +2300,8 @@ export default function ChatView(props: ChatViewProps) {
       event.stopPropagation();
       void runProjectScript(script);
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
   }, [
     activeProject,
     terminalState.terminalOpen,
@@ -2401,11 +2428,13 @@ export default function ChatView(props: ChatViewProps) {
           expiredTerminalContextCount,
           "empty",
         );
-        toastManager.add({
-          type: "warning",
-          title: toastCopy.title,
-          description: toastCopy.description,
-        });
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: toastCopy.title,
+            description: toastCopy.description,
+          }),
+        );
       }
       return;
     }
@@ -2487,11 +2516,13 @@ export default function ChatView(props: ChatViewProps) {
         expiredTerminalContextCount,
         "omitted",
       );
-      toastManager.add({
-        type: "warning",
-        title: toastCopy.title,
-        description: toastCopy.description,
-      });
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: toastCopy.title,
+          description: toastCopy.description,
+        }),
+      );
     }
     promptRef.current = "";
     clearComposerDraftContent(composerDraftTarget);
@@ -2517,7 +2548,7 @@ export default function ChatView(props: ChatViewProps) {
         }
       }
       const title = truncate(titleSeed);
-      const threadCreateModelSelection: ModelSelection = makeModelSelection(
+      const threadCreateModelSelection = createModelSelection(
         ctxSelectedProvider,
         ctxSelectedModel ||
           activeProject.defaultModelSelection?.model ||
@@ -2743,7 +2774,7 @@ export default function ChatView(props: ChatViewProps) {
       promptRef.current = "";
       composerRef.current?.resetCursorState({ cursor: 0 });
     },
-    [activePendingProgress?.activeQuestion, activePendingUserInput, composerRef.current],
+    [activePendingProgress?.activeQuestion, activePendingUserInput],
   );
 
   const onChangeActivePendingUserInputCustomAnswer = useCallback(
@@ -2777,7 +2808,7 @@ export default function ChatView(props: ChatViewProps) {
         composerRef.current?.focusAt(nextCursor);
       }
     },
-    [activePendingUserInput, composerRef.current],
+    [activePendingUserInput],
   );
 
   const onAdvanceActivePendingUserInput = useCallback(() => {
@@ -2948,7 +2979,6 @@ export default function ChatView(props: ChatViewProps) {
       setComposerDraftInteractionMode,
       setThreadError,
       environmentId,
-      composerRef.current,
     ],
   );
 
@@ -3058,12 +3088,16 @@ export default function ChatView(props: ChatViewProps) {
             threadId: nextThreadId,
           })
           .catch(() => undefined);
-        toastManager.add({
-          type: "error",
-          title: "Could not start implementation thread",
-          description:
-            err instanceof Error ? err.message : "An error occurred while creating the new thread.",
-        });
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not start implementation thread",
+            description:
+              err instanceof Error
+                ? err.message
+                : "An error occurred while creating the new thread.",
+          }),
+        );
       })
       .then(finish, finish);
   }, [
@@ -3079,7 +3113,6 @@ export default function ChatView(props: ChatViewProps) {
     resetLocalDispatch,
     runtimeMode,
     environmentId,
-    composerRef.current,
   ]);
 
   const onProviderModelSelect = useCallback(
@@ -3096,40 +3129,22 @@ export default function ChatView(props: ChatViewProps) {
         providerStatuses,
         model,
       );
-      const nextModelSelection: ModelSelection = makeModelSelection(
-        resolvedProvider,
-        resolvedModel,
-      );
+      const nextModelSelection: ModelSelection = {
+        provider: resolvedProvider,
+        model: resolvedModel,
+      };
       setComposerDraftModelSelection(
         scopeThreadRef(activeThread.environmentId, activeThread.id),
         nextModelSelection,
       );
-      const nextInteractionMode = normalizeInteractionModeForProvider(
-        resolvedProvider,
-        interactionMode,
-      );
-      if (nextInteractionMode !== interactionMode) {
-        setComposerDraftInteractionMode(
-          scopeThreadRef(activeThread.environmentId, activeThread.id),
-          nextInteractionMode,
-        );
-        if (isLocalDraftThread) {
-          setDraftThreadContext(composerDraftTarget, { interactionMode: nextInteractionMode });
-        }
-      }
       setStickyComposerModelSelection(nextModelSelection);
       scheduleComposerFocus();
     },
     [
       activeThread,
-      interactionMode,
-      isLocalDraftThread,
       lockedProvider,
       scheduleComposerFocus,
-      composerDraftTarget,
-      setComposerDraftInteractionMode,
       setComposerDraftModelSelection,
-      setDraftThreadContext,
       setStickyComposerModelSelection,
       providerStatuses,
       settings,
@@ -3333,6 +3348,7 @@ export default function ChatView(props: ChatViewProps) {
               activeProposedPlan={activeProposedPlan}
               activePlan={activePlan as { turnId?: TurnId } | null}
               sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
+              planSidebarLabel={planSidebarLabel}
               planSidebarOpen={planSidebarOpen}
               runtimeMode={runtimeMode}
               interactionMode={interactionMode}
@@ -3343,6 +3359,8 @@ export default function ChatView(props: ChatViewProps) {
               activeThreadActivities={activeThread?.activities}
               resolvedTheme={resolvedTheme}
               settings={settings}
+              keybindings={keybindings}
+              terminalOpen={Boolean(terminalState.terminalOpen)}
               gitCwd={gitCwd}
               promptRef={promptRef}
               composerImagesRef={composerImagesRef}
@@ -3360,7 +3378,7 @@ export default function ChatView(props: ChatViewProps) {
                 onChangeActivePendingUserInputCustomAnswer
               }
               onProviderModelSelect={onProviderModelSelect}
-              toggleInteractionMode={cycleInteractionMode}
+              toggleInteractionMode={toggleInteractionMode}
               handleRuntimeModeChange={handleRuntimeModeChange}
               handleInteractionModeChange={handleInteractionModeChange}
               togglePlanSidebar={togglePlanSidebar}
@@ -3417,22 +3435,17 @@ export default function ChatView(props: ChatViewProps) {
         {/* end chat column */}
 
         {/* Plan sidebar */}
-        {planSidebarOpen ? (
+        {planSidebarOpen && !shouldUsePlanSidebarSheet ? (
           <PlanSidebar
             activePlan={activePlan}
             activeProposedPlan={sidebarProposedPlan}
+            label={planSidebarLabel}
             environmentId={environmentId}
             markdownCwd={gitCwd ?? undefined}
             workspaceRoot={activeWorkspaceRoot}
             timestampFormat={timestampFormat}
-            onClose={() => {
-              setPlanSidebarOpen(false);
-              // Track that the user explicitly dismissed for this turn so auto-open won't fight them.
-              const turnKey = activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? null;
-              if (turnKey) {
-                planSidebarDismissedForTurnRef.current = turnKey;
-              }
-            }}
+            mode="sidebar"
+            onClose={closePlanSidebar}
           />
         ) : null}
       </div>
@@ -3451,9 +3464,25 @@ export default function ChatView(props: ChatViewProps) {
           splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
           newShortcutLabel={newTerminalShortcutLabel ?? undefined}
           closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+          keybindings={keybindings}
           onAddTerminalContext={addTerminalContextToDraft}
         />
       ))}
+      {shouldUsePlanSidebarSheet ? (
+        <RightPanelSheet open={planSidebarOpen} onClose={closePlanSidebar}>
+          <PlanSidebar
+            activePlan={activePlan}
+            activeProposedPlan={sidebarProposedPlan}
+            label={planSidebarLabel}
+            environmentId={environmentId}
+            markdownCwd={gitCwd ?? undefined}
+            workspaceRoot={activeWorkspaceRoot}
+            timestampFormat={timestampFormat}
+            mode="sheet"
+            onClose={closePlanSidebar}
+          />
+        </RightPanelSheet>
+      ) : null}
 
       {expandedImage && (
         <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />

@@ -12,6 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import {
   PROVIDER_DISPLAY_NAMES,
+  type DesktopUpdateChannel,
   type ScopedThreadRef,
   type ProviderKind,
   type ServerProvider,
@@ -19,7 +20,8 @@ import {
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import { makeModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
+import { normalizeModelSlug } from "@t3tools/shared/model";
+import { createModelSelection } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
 import {
@@ -54,13 +56,14 @@ import {
 } from "../../store";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "../../lib/utils";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
-import { toastManager } from "../ui/toast";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   SettingResetButton,
@@ -101,8 +104,13 @@ const TIMESTAMP_FORMAT_LABELS = {
 type InstallProviderSettings = {
   provider: ProviderKind;
   title: string;
+  badgeLabel?: string;
   binaryPlaceholder: string;
   binaryDescription: ReactNode;
+  serverUrlPlaceholder?: string;
+  serverUrlDescription?: ReactNode;
+  serverPasswordPlaceholder?: string;
+  serverPasswordDescription?: ReactNode;
   homePathKey?: "codexHomePath";
   homePlaceholder?: string;
   homeDescription?: ReactNode;
@@ -121,7 +129,7 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
   {
     provider: "copilot",
     title: "GitHub Copilot",
-    binaryPlaceholder: "Copilot binary path",
+    binaryPlaceholder: "GitHub Copilot CLI binary path",
     binaryDescription: "Path to the GitHub Copilot CLI binary",
   },
   {
@@ -129,6 +137,24 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     title: "Claude",
     binaryPlaceholder: "Claude binary path",
     binaryDescription: "Path to the Claude binary",
+  },
+  {
+    provider: "cursor",
+    title: "Cursor",
+    badgeLabel: "Early Access",
+    binaryPlaceholder: "Cursor agent binary path",
+    binaryDescription: "Path to the Cursor agent binary",
+  },
+  {
+    provider: "opencode",
+    title: "OpenCode",
+    binaryPlaceholder: "OpenCode binary path",
+    binaryDescription: "Path to the OpenCode binary",
+    serverUrlPlaceholder: "http://127.0.0.1:4096",
+    serverUrlDescription: "Leave blank to let T3 Code spawn the server when needed",
+    serverPasswordPlaceholder: "Server password (optional)",
+    serverPasswordDescription:
+      "If your OpenCode server requires authentication, enter the password here. NOTE: Stored in plain text on disk",
   },
 ] as const;
 
@@ -238,8 +264,44 @@ function AboutVersionTitle() {
 function AboutVersionSection() {
   const queryClient = useQueryClient();
   const updateStateQuery = useDesktopUpdateState();
+  const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
 
   const updateState = updateStateQuery.data ?? null;
+  const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
+  const selectedUpdateChannel = updateState?.channel ?? "latest";
+
+  const handleUpdateChannelChange = useCallback(
+    (channel: DesktopUpdateChannel) => {
+      const bridge = window.desktopBridge;
+      if (
+        !bridge ||
+        typeof bridge.setUpdateChannel !== "function" ||
+        channel === selectedUpdateChannel
+      ) {
+        return;
+      }
+
+      setIsChangingUpdateChannel(true);
+      void bridge
+        .setUpdateChannel(channel)
+        .then((state) => {
+          setDesktopUpdateStateQueryData(queryClient, state);
+        })
+        .catch((error: unknown) => {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not change update track",
+              description: error instanceof Error ? error.message : "Update track change failed.",
+            }),
+          );
+        })
+        .finally(() => {
+          setIsChangingUpdateChannel(false);
+        });
+    },
+    [queryClient, selectedUpdateChannel],
+  );
 
   const handleButtonClick = useCallback(() => {
     const bridge = window.desktopBridge;
@@ -254,11 +316,13 @@ function AboutVersionSection() {
           setDesktopUpdateStateQueryData(queryClient, result.state);
         })
         .catch((error: unknown) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not download update",
-            description: error instanceof Error ? error.message : "Download failed.",
-          });
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not download update",
+              description: error instanceof Error ? error.message : "Download failed.",
+            }),
+          );
         });
       return;
     }
@@ -276,11 +340,13 @@ function AboutVersionSection() {
           setDesktopUpdateStateQueryData(queryClient, result.state);
         })
         .catch((error: unknown) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not install update",
-            description: error instanceof Error ? error.message : "Install failed.",
-          });
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not install update",
+              description: error instanceof Error ? error.message : "Install failed.",
+            }),
+          );
         });
       return;
     }
@@ -291,20 +357,24 @@ function AboutVersionSection() {
       .then((result) => {
         setDesktopUpdateStateQueryData(queryClient, result.state);
         if (!result.checked) {
-          toastManager.add({
-            type: "error",
-            title: "Could not check for updates",
-            description:
-              result.state.message ?? "Automatic updates are not available in this build.",
-          });
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not check for updates",
+              description:
+                result.state.message ?? "Automatic updates are not available in this build.",
+            }),
+          );
         }
       })
       .catch((error: unknown) => {
-        toastManager.add({
-          type: "error",
-          title: "Could not check for updates",
-          description: error instanceof Error ? error.message : "Update check failed.",
-        });
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not check for updates",
+            description: error instanceof Error ? error.message : "Update check failed.",
+          }),
+        );
       });
   }, [queryClient, updateState]);
 
@@ -329,27 +399,59 @@ function AboutVersionSection() {
       : "Current version of the application.";
 
   return (
-    <SettingsRow
-      title={<AboutVersionTitle />}
-      description={description}
-      control={
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="xs"
-                variant={action === "install" ? "default" : "outline"}
-                disabled={buttonDisabled}
-                onClick={handleButtonClick}
-              >
-                {buttonLabel}
-              </Button>
-            }
-          />
-          {buttonTooltip ? <TooltipPopup>{buttonTooltip}</TooltipPopup> : null}
-        </Tooltip>
-      }
-    />
+    <>
+      <SettingsRow
+        title={<AboutVersionTitle />}
+        description={description}
+        control={
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="xs"
+                  variant={action === "install" ? "default" : "outline"}
+                  disabled={buttonDisabled}
+                  onClick={handleButtonClick}
+                >
+                  {buttonLabel}
+                </Button>
+              }
+            />
+            {buttonTooltip ? <TooltipPopup>{buttonTooltip}</TooltipPopup> : null}
+          </Tooltip>
+        }
+      />
+      <SettingsRow
+        title="Update track"
+        description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
+        control={
+          <Select
+            value={selectedUpdateChannel}
+            onValueChange={(value) => {
+              handleUpdateChannelChange(value as DesktopUpdateChannel);
+            }}
+          >
+            <SelectTrigger
+              className="w-full sm:w-40"
+              aria-label="Update track"
+              disabled={!hasDesktopBridge || isChangingUpdateChannel}
+            >
+              <SelectValue>
+                {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value="latest">
+                Stable
+              </SelectItem>
+              <SelectItem hideIndicator value="nightly">
+                Nightly
+              </SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      />
+    </>
   );
 }
 
@@ -383,6 +485,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
         : []),
+      ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
+        ? ["Add project base directory"]
+        : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
         ? ["Archive confirmation"]
         : []),
@@ -397,6 +502,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       isGitWritingModelDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
@@ -454,7 +560,22 @@ export function GeneralSettingsPanel() {
     claudeAgent: Boolean(
       settings.providers.claudeAgent.binaryPath !==
         DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
-      settings.providers.claudeAgent.customModels.length > 0,
+      settings.providers.claudeAgent.customModels.length > 0 ||
+      settings.providers.claudeAgent.launchArgs !== "",
+    ),
+    cursor: Boolean(
+      settings.providers.cursor.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.cursor.binaryPath ||
+      settings.providers.cursor.customModels.length > 0,
+    ),
+    opencode: Boolean(
+      settings.providers.opencode.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.opencode.binaryPath ||
+      settings.providers.opencode.serverUrl !==
+        DEFAULT_UNIFIED_SETTINGS.providers.opencode.serverUrl ||
+      settings.providers.opencode.serverPassword !==
+        DEFAULT_UNIFIED_SETTINGS.providers.opencode.serverPassword ||
+      settings.providers.opencode.customModels.length > 0,
     ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
@@ -463,6 +584,8 @@ export function GeneralSettingsPanel() {
     codex: "",
     copilot: "",
     claudeAgent: "",
+    cursor: "",
+    opencode: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -489,6 +612,11 @@ export function GeneralSettingsPanel() {
   const availableEditors = useServerAvailableEditors();
   const observability = useServerObservability();
   const serverProviders = useServerProviders();
+  const visibleProviderSettings = PROVIDER_SETTINGS.filter(
+    (providerSettings) =>
+      providerSettings.provider !== "cursor" ||
+      serverProviders.some((provider) => provider.provider === "cursor"),
+  );
   const codexHomePath = settings.providers.codex.homePath;
   const logsDirectoryPath = observability?.logsDirectoryPath ?? null;
   const diagnosticsDescription = (() => {
@@ -653,7 +781,7 @@ export function GeneralSettingsPanel() {
     [settings, updateSettings],
   );
 
-  const providerCards = PROVIDER_SETTINGS.map((providerSettings) => {
+  const providerCards = visibleProviderSettings.map((providerSettings) => {
     const liveProvider = serverProviders.find(
       (candidate) => candidate.provider === providerSettings.provider,
     );
@@ -673,8 +801,13 @@ export function GeneralSettingsPanel() {
     return {
       provider: providerSettings.provider,
       title: providerSettings.title,
+      badgeLabel: providerSettings.badgeLabel,
       binaryPlaceholder: providerSettings.binaryPlaceholder,
       binaryDescription: providerSettings.binaryDescription,
+      serverUrlPlaceholder: providerSettings.serverUrlPlaceholder,
+      serverUrlDescription: providerSettings.serverUrlDescription,
+      serverPasswordPlaceholder: providerSettings.serverPasswordPlaceholder,
+      serverPasswordDescription: providerSettings.serverPasswordDescription,
       homePathKey: providerSettings.homePathKey,
       homePlaceholder: providerSettings.homePlaceholder,
       homeDescription: providerSettings.homeDescription,
@@ -687,6 +820,8 @@ export function GeneralSettingsPanel() {
         providerSettings.provider === "copilot" && "wslDistro" in providerConfig
           ? providerConfig.wslDistro
           : undefined,
+      serverUrlValue: "serverUrl" in providerConfig ? providerConfig.serverUrl : "",
+      serverPasswordValue: "serverPassword" in providerConfig ? providerConfig.serverPassword : "",
       isDirty: !Equal.equals(providerConfig, defaultProviderConfig),
       liveProvider,
       models,
@@ -876,6 +1011,34 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          title="Add project starts in"
+          description='Leave empty to use "~/" when the Add Project browser opens.'
+          resetAction={
+            settings.addProjectBaseDirectory !==
+            DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
+              <SettingResetButton
+                label="add project base directory"
+                onClick={() =>
+                  updateSettings({
+                    addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Input
+              className="w-full sm:w-72"
+              value={settings.addProjectBaseDirectory}
+              onChange={(event) => updateSettings({ addProjectBaseDirectory: event.target.value })}
+              placeholder="~/"
+              spellCheck={false}
+              aria-label="Add project base directory"
+            />
+          }
+        />
+
+        <SettingsRow
           title="Archive confirmation"
           description="Require a second click on the inline archive action before a thread is archived."
           resetAction={
@@ -958,7 +1121,7 @@ export function GeneralSettingsPanel() {
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: { provider, model },
+                        textGenerationModelSelection: createModelSelection(provider, model),
                       },
                       serverProviders,
                     ),
@@ -983,7 +1146,7 @@ export function GeneralSettingsPanel() {
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: makeModelSelection(
+                        textGenerationModelSelection: createModelSelection(
                           textGenProvider,
                           textGenModel,
                           nextOptions,
@@ -1044,6 +1207,11 @@ export function GeneralSettingsPanel() {
                         className={cn("size-2 shrink-0 rounded-full", providerCard.statusStyle.dot)}
                       />
                       <h3 className="text-sm font-medium text-foreground">{providerDisplayName}</h3>
+                      {providerCard.badgeLabel ? (
+                        <Badge variant="warning" size="sm" className="shrink-0">
+                          {providerCard.badgeLabel}
+                        </Badge>
+                      ) : null}
                       {providerCard.versionLabel ? (
                         <code className="text-xs text-muted-foreground">
                           {providerCard.versionLabel}
@@ -1166,6 +1334,120 @@ export function GeneralSettingsPanel() {
                       </label>
                     </div>
 
+                    {providerCard.serverUrlPlaceholder ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <label
+                          htmlFor={`provider-install-${providerCard.provider}-server-url`}
+                          className="block"
+                        >
+                          <span className="text-xs font-medium text-foreground">
+                            {providerDisplayName} server URL
+                          </span>
+                          <Input
+                            id={`provider-install-${providerCard.provider}-server-url`}
+                            className="mt-1.5"
+                            value={providerCard.serverUrlValue}
+                            onChange={(event) =>
+                              updateSettings({
+                                providers: {
+                                  ...settings.providers,
+                                  [providerCard.provider]: {
+                                    ...settings.providers[providerCard.provider],
+                                    ...(providerCard.provider === "opencode"
+                                      ? { serverUrl: event.target.value }
+                                      : {}),
+                                  },
+                                },
+                              })
+                            }
+                            placeholder={providerCard.serverUrlPlaceholder}
+                            spellCheck={false}
+                          />
+                          {providerCard.serverUrlDescription ? (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {providerCard.serverUrlDescription}
+                            </span>
+                          ) : null}
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {providerCard.serverPasswordPlaceholder ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <label
+                          htmlFor={`provider-install-${providerCard.provider}-server-password`}
+                          className="block"
+                        >
+                          <span className="text-xs font-medium text-foreground">
+                            {providerDisplayName} server password
+                          </span>
+                          <Input
+                            id={`provider-install-${providerCard.provider}-server-password`}
+                            className="mt-1.5"
+                            type="password"
+                            autoComplete="off"
+                            value={providerCard.serverPasswordValue}
+                            onChange={(event) =>
+                              updateSettings({
+                                providers: {
+                                  ...settings.providers,
+                                  [providerCard.provider]: {
+                                    ...settings.providers[providerCard.provider],
+                                    ...(providerCard.provider === "opencode"
+                                      ? { serverPassword: event.target.value }
+                                      : {}),
+                                  },
+                                },
+                              })
+                            }
+                            placeholder={providerCard.serverPasswordPlaceholder}
+                            spellCheck={false}
+                          />
+                          {providerCard.serverPasswordDescription ? (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {providerCard.serverPasswordDescription}
+                            </span>
+                          ) : null}
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {providerCard.homePathKey ? (
+                      <div className="border-t border-border/60 px-4 py-3 sm:px-5">
+                        <label
+                          htmlFor={`provider-install-${providerCard.homePathKey}`}
+                          className="block"
+                        >
+                          <span className="text-xs font-medium text-foreground">
+                            CODEX_HOME path
+                          </span>
+                          <Input
+                            id={`provider-install-${providerCard.homePathKey}`}
+                            className="mt-1.5"
+                            value={codexHomePath}
+                            onChange={(event) =>
+                              updateSettings({
+                                providers: {
+                                  ...settings.providers,
+                                  codex: {
+                                    ...settings.providers.codex,
+                                    homePath: event.target.value,
+                                  },
+                                },
+                              })
+                            }
+                            placeholder={providerCard.homePlaceholder}
+                            spellCheck={false}
+                          />
+                          {providerCard.homeDescription ? (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              {providerCard.homeDescription}
+                            </span>
+                          ) : null}
+                        </label>
+                      </div>
+                    ) : null}
+
                     {providerCard.provider === "copilot" ? (
                       <>
                         <div className="border-t border-border/60 px-4 py-3 sm:px-5">
@@ -1230,38 +1512,33 @@ export function GeneralSettingsPanel() {
                       </>
                     ) : null}
 
-                    {providerCard.homePathKey ? (
+                    {providerCard.provider === "claudeAgent" ? (
                       <div className="border-t border-border/60 px-4 py-3 sm:px-5">
-                        <label
-                          htmlFor={`provider-install-${providerCard.homePathKey}`}
-                          className="block"
-                        >
+                        <label htmlFor="provider-install-claudeAgent-launch-args" className="block">
                           <span className="text-xs font-medium text-foreground">
-                            CODEX_HOME path
+                            Launch arguments
                           </span>
                           <Input
-                            id={`provider-install-${providerCard.homePathKey}`}
+                            id="provider-install-claudeAgent-launch-args"
                             className="mt-1.5"
-                            value={codexHomePath}
+                            value={settings.providers.claudeAgent.launchArgs}
                             onChange={(event) =>
                               updateSettings({
                                 providers: {
                                   ...settings.providers,
-                                  codex: {
-                                    ...settings.providers.codex,
-                                    homePath: event.target.value,
+                                  claudeAgent: {
+                                    ...settings.providers.claudeAgent,
+                                    launchArgs: event.target.value,
                                   },
                                 },
                               })
                             }
-                            placeholder={providerCard.homePlaceholder}
+                            placeholder="e.g. --chrome"
                             spellCheck={false}
                           />
-                          {providerCard.homeDescription ? (
-                            <span className="mt-1 block text-xs text-muted-foreground">
-                              {providerCard.homeDescription}
-                            </span>
-                          ) : null}
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            Additional CLI arguments passed to Claude Code on session start.
+                          </span>
                         </label>
                       </div>
                     ) : null}
@@ -1289,9 +1566,6 @@ export function GeneralSettingsPanel() {
                           ) {
                             capLabels.push("Reasoning");
                           }
-                          if (model.premiumRequestMultiplier) {
-                            capLabels.push(`Premium requests: ${model.premiumRequestMultiplier}`);
-                          }
                           const hasDetails = capLabels.length > 0 || model.name !== model.slug;
 
                           return (
@@ -1302,11 +1576,6 @@ export function GeneralSettingsPanel() {
                               <span className="min-w-0 truncate text-xs text-foreground/90">
                                 {model.name}
                               </span>
-                              {model.premiumRequestMultiplier ? (
-                                <span className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                                  {model.premiumRequestMultiplier}
-                                </span>
-                              ) : null}
                               {hasDetails ? (
                                 <Tooltip>
                                   <TooltipTrigger
@@ -1386,7 +1655,11 @@ export function GeneralSettingsPanel() {
                           placeholder={
                             providerCard.provider === "codex"
                               ? "gpt-6.7-codex-ultra-preview"
-                              : "claude-sonnet-5-0"
+                              : providerCard.provider === "copilot"
+                                ? "claude-sonnet-4-6"
+                                : providerCard.provider === "opencode"
+                                  ? "openai/gpt-5"
+                                  : "claude-sonnet-5-0"
                           }
                           spellCheck={false}
                         />
@@ -1514,11 +1787,13 @@ export function ArchivedThreadsPanel() {
         try {
           await unarchiveThread(threadRef);
         } catch (error) {
-          toastManager.add({
-            type: "error",
-            title: "Failed to unarchive thread",
-            description: error instanceof Error ? error.message : "An error occurred.",
-          });
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to unarchive thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
         }
         return;
       }
@@ -1582,12 +1857,14 @@ export function ArchivedThreadsPanel() {
                   onClick={() =>
                     void unarchiveThread(scopeThreadRef(thread.environmentId, thread.id)).catch(
                       (error) => {
-                        toastManager.add({
-                          type: "error",
-                          title: "Failed to unarchive thread",
-                          description:
-                            error instanceof Error ? error.message : "An error occurred.",
-                        });
+                        toastManager.add(
+                          stackedThreadToast({
+                            type: "error",
+                            title: "Failed to unarchive thread",
+                            description:
+                              error instanceof Error ? error.message : "An error occurred.",
+                          }),
+                        );
                       },
                     )
                   }

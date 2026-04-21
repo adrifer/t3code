@@ -1,14 +1,16 @@
 import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
-import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas";
+import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import {
   ClaudeModelOptions,
   CodexModelOptions,
   CopilotModelOptions,
+  CursorModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-} from "./model";
-import { ModelSelection } from "./orchestration";
+  OpenCodeModelOptions,
+} from "./model.ts";
+import { ModelSelection, ProviderKind } from "./orchestration.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -24,10 +26,31 @@ export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
+export const SidebarProjectGroupingMode = Schema.Literals([
+  "repository",
+  "repository_path",
+  "separate",
+]);
+export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
+export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
+
 export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  favorites: Schema.Array(
+    Schema.Struct({
+      provider: ProviderKind,
+      model: TrimmedNonEmptyString,
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
+  ),
+  sidebarProjectGroupingOverrides: Schema.Record(
+    TrimmedNonEmptyString,
+    SidebarProjectGroupingMode,
+  ).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER)),
   ),
@@ -71,6 +94,7 @@ export const ClaudeSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   binaryPath: makeBinaryPathSetting("claude"),
   customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  launchArgs: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
 });
 export type ClaudeSettings = typeof ClaudeSettings.Type;
 
@@ -83,6 +107,22 @@ export const CopilotSettings = Schema.Struct({
 });
 export type CopilotSettings = typeof CopilotSettings.Type;
 
+export const CursorSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  binaryPath: makeBinaryPathSetting("agent"),
+  apiEndpoint: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+});
+export type CursorSettings = typeof CursorSettings.Type;
+export const OpenCodeSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  binaryPath: makeBinaryPathSetting("opencode"),
+  serverUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  serverPassword: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+});
+export type OpenCodeSettings = typeof OpenCodeSettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -94,6 +134,7 @@ export const ServerSettings = Schema.Struct({
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("local" as const satisfies ThreadEnvMode)),
   ),
+  addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -108,6 +149,8 @@ export const ServerSettings = Schema.Struct({
     codex: CodexSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     copilot: CopilotSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
@@ -154,6 +197,18 @@ const ClaudeModelOptionsPatch = Schema.Struct({
   contextWindow: Schema.optionalKey(ClaudeModelOptions.fields.contextWindow),
 });
 
+const CursorModelOptionsPatch = Schema.Struct({
+  reasoning: Schema.optionalKey(CursorModelOptions.fields.reasoning),
+  fastMode: Schema.optionalKey(CursorModelOptions.fields.fastMode),
+  thinking: Schema.optionalKey(CursorModelOptions.fields.thinking),
+  contextWindow: Schema.optionalKey(CursorModelOptions.fields.contextWindow),
+});
+
+const OpenCodeModelOptionsPatch = Schema.Struct({
+  variant: Schema.optionalKey(OpenCodeModelOptions.fields.variant),
+  agent: Schema.optionalKey(OpenCodeModelOptions.fields.agent),
+});
+
 const ModelSelectionPatch = Schema.Union([
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("codex")),
@@ -170,6 +225,16 @@ const ModelSelectionPatch = Schema.Union([
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(ClaudeModelOptionsPatch),
   }),
+  Schema.Struct({
+    provider: Schema.optionalKey(Schema.Literal("cursor")),
+    model: Schema.optionalKey(TrimmedNonEmptyString),
+    options: Schema.optionalKey(CursorModelOptionsPatch),
+  }),
+  Schema.Struct({
+    provider: Schema.optionalKey(Schema.Literal("opencode")),
+    model: Schema.optionalKey(TrimmedNonEmptyString),
+    options: Schema.optionalKey(OpenCodeModelOptionsPatch),
+  }),
 ]);
 
 const CodexSettingsPatch = Schema.Struct({
@@ -183,6 +248,7 @@ const ClaudeSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+  launchArgs: Schema.optionalKey(Schema.String),
 });
 
 const CopilotSettingsPatch = Schema.Struct({
@@ -193,9 +259,26 @@ const CopilotSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const CursorSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(Schema.String),
+  apiEndpoint: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
+const OpenCodeSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(Schema.String),
+  serverUrl: Schema.optionalKey(Schema.String),
+  serverPassword: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
 export const ServerSettingsPatch = Schema.Struct({
+  // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  addProjectBaseDirectory: Schema.optionalKey(Schema.String),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(
     Schema.Struct({
@@ -208,7 +291,31 @@ export const ServerSettingsPatch = Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       copilot: Schema.optionalKey(CopilotSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
+      cursor: Schema.optionalKey(CursorSettingsPatch),
+      opencode: Schema.optionalKey(OpenCodeSettingsPatch),
     }),
   ),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
+
+export const ClientSettingsPatch = Schema.Struct({
+  confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
+  confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
+  diffWordWrap: Schema.optionalKey(Schema.Boolean),
+  favorites: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        provider: ProviderKind,
+        model: TrimmedNonEmptyString,
+      }),
+    ),
+  ),
+  sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
+  sidebarProjectGroupingOverrides: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),
+  ),
+  sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
+  sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
+  timestampFormat: Schema.optionalKey(TimestampFormat),
+});
+export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
