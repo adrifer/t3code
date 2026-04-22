@@ -31,7 +31,7 @@ describe("parseCopilotModelPickerOutput", () => {
       {
         slug: "claude-opus-4-7",
         name: "Claude Opus 4.7",
-        premiumRequestMultiplier: "7.5x",
+        premiumRequestMultiplier: "3x",
       },
       {
         slug: "claude-opus-4-6",
