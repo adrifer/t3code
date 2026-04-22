@@ -5,67 +5,73 @@ on:
     tags:
       - "v*.*.*"
       - "!v*-nightly.*"
-  schedule:
-    - cron: "0 */3 * * *"
-  workflow_dispatch:
-    inputs:
-      channel:
-        description: "Release channel"
-        required: false
-        default: stable
-        type: choice
-        options:
-          - stable
-          - nightly
-      version:
-        description: "Release version (for example 1.2.3 or v1.2.3)"
-        required: false
-        type: string
+  # Upstream also supports scheduled and manual release entry points.
+  # This fork intentionally stays tag-only, so these triggers remain disabled.
+  # schedule:
+  #   - cron: "0 */3 * * *"
+  # workflow_dispatch:
+  #   inputs:
+  #     channel:
+  #       description: "Release channel"
+  #       required: false
+  #       default: stable
+  #       type: choice
+  #       options:
+  #         - stable
+  #         - nightly
+  #     version:
+  #       description: "Release version (for example 1.2.3 or v1.2.3)"
+  #       required: false
+  #       type: string
 
 permissions:
   contents: write
   id-token: write
 
 jobs:
-  check_changes:
-    name: Check for changes since last nightly
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-24.04
-    outputs:
-      has_changes: ${{ steps.check.outputs.has_changes }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - id: check
-        name: Compare HEAD to last nightly tag
-        run: |
-          last_nightly_tag=$(git tag --list 'v*-nightly.*' 'nightly-v*' --sort=-creatordate | head -n 1)
-          if [[ -z "$last_nightly_tag" ]]; then
-            echo "No previous nightly tag found. Proceeding with release."
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          last_nightly_sha=$(git rev-parse "$last_nightly_tag^{commit}")
-          head_sha=$(git rev-parse HEAD)
-
-          if [[ "$last_nightly_sha" == "$head_sha" ]]; then
-            echo "No changes on main since last nightly release ($last_nightly_tag). Skipping."
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Changes detected on main since $last_nightly_tag ($last_nightly_sha → $head_sha). Proceeding."
-            echo "has_changes=true" >> "$GITHUB_OUTPUT"
-          fi
+  # Upstream nightly releases also use a `check_changes` job plus a conditional
+  # preflight gate. This fork does not publish nightlies, so the upstream block
+  # is intentionally kept only as documentation.
+  # check_changes:
+  #   name: Check for changes since last nightly
+  #   if: github.event_name == 'schedule'
+  #   runs-on: ubuntu-24.04
+  #   outputs:
+  #     has_changes: ${{ steps.check.outputs.has_changes }}
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v6
+  #       with:
+  #         fetch-depth: 0
+  #     - id: check
+  #       name: Compare HEAD to last nightly tag
+  #       run: |
+  #         last_nightly_tag=$(git tag --list 'v*-nightly.*' 'nightly-v*' --sort=-creatordate | head -n 1)
+  #         if [[ -z "$last_nightly_tag" ]]; then
+  #           echo "No previous nightly tag found. Proceeding with release."
+  #           echo "has_changes=true" >> "$GITHUB_OUTPUT"
+  #           exit 0
+  #         fi
+  #
+  #         last_nightly_sha=$(git rev-parse "$last_nightly_tag^{commit}")
+  #         head_sha=$(git rev-parse HEAD)
+  #
+  #         if [[ "$last_nightly_sha" == "$head_sha" ]]; then
+  #           echo "No changes on main since last nightly release ($last_nightly_tag). Skipping."
+  #           echo "has_changes=false" >> "$GITHUB_OUTPUT"
+  #         else
+  #           echo "Changes detected on main since $last_nightly_tag ($last_nightly_sha → $head_sha). Proceeding."
+  #           echo "has_changes=true" >> "$GITHUB_OUTPUT"
+  #         fi
 
   preflight:
     name: Preflight
-    needs: [check_changes]
-    if: |
-      !failure() && !cancelled() &&
-      (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
+    # Upstream nightly flow:
+    # needs: [check_changes]
+    # if: |
+    #   !failure() && !cancelled() &&
+    #   (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ github.repository_owner == 'pingdotgg' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
     timeout-minutes: 10
     outputs:
@@ -101,56 +107,45 @@ jobs:
       - id: release_meta
         name: Resolve release version
         shell: bash
-        env:
-          DISPATCH_CHANNEL: ${{ github.event.inputs.channel }}
-          DISPATCH_VERSION: ${{ github.event.inputs.version }}
-          NIGHTLY_DATE: ${{ github.run_started_at }}
-          NIGHTLY_SHA: ${{ github.sha }}
-          NIGHTLY_RUN_NUMBER: ${{ github.run_number }}
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_CHANNEL:-stable}" == "nightly" ) ]]; then
-            nightly_date="$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)"
+          # Upstream also resolves scheduled/manual nightly releases here.
+          # This fork keeps releases tag-driven, so version metadata comes
+          # directly from the pushed tag ref instead.
+          #
+          # if [[ "${GITHUB_EVENT_NAME}" == "schedule" || ( "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${DISPATCH_CHANNEL:-stable}" == "nightly" ) ]]; then
+          #   nightly_date="$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)"
+          #
+          #   node scripts/resolve-nightly-release.ts \
+          #     --date "$nightly_date" \
+          #     --run-number "$NIGHTLY_RUN_NUMBER" \
+          #     --sha "$NIGHTLY_SHA" \
+          #     --github-output
+          #
+          #   echo "release_channel=nightly" >> "$GITHUB_OUTPUT"
+          #   echo "cli_dist_tag=nightly" >> "$GITHUB_OUTPUT"
+          #   echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          #   echo "make_latest=false" >> "$GITHUB_OUTPUT"
+          # else
+          raw="${GITHUB_REF_NAME}"
+          version="${raw#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $raw" >&2
+            exit 1
+          fi
 
-            node scripts/resolve-nightly-release.ts \
-              --date "$nightly_date" \
-              --run-number "$NIGHTLY_RUN_NUMBER" \
-              --sha "$NIGHTLY_SHA" \
-              --github-output
-
-            echo "release_channel=nightly" >> "$GITHUB_OUTPUT"
-            echo "cli_dist_tag=nightly" >> "$GITHUB_OUTPUT"
+          echo "release_channel=stable" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "name=T3 Code v$version" >> "$GITHUB_OUTPUT"
+          echo "cli_dist_tag=latest" >> "$GITHUB_OUTPUT"
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "make_latest=true" >> "$GITHUB_OUTPUT"
+          else
             echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
             echo "make_latest=false" >> "$GITHUB_OUTPUT"
-          else
-            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-              raw="${DISPATCH_VERSION}"
-              if [[ -z "$raw" ]]; then
-                echo "workflow_dispatch stable releases require the version input." >&2
-                exit 1
-              fi
-            else
-              raw="${GITHUB_REF_NAME}"
-            fi
-
-            version="${raw#v}"
-            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-              echo "Invalid release version: $raw" >&2
-              exit 1
-            fi
-
-            echo "release_channel=stable" >> "$GITHUB_OUTPUT"
-            echo "version=$version" >> "$GITHUB_OUTPUT"
-            echo "tag=v$version" >> "$GITHUB_OUTPUT"
-            echo "name=T3 Code v$version" >> "$GITHUB_OUTPUT"
-            echo "cli_dist_tag=latest" >> "$GITHUB_OUTPUT"
-            if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
-              echo "make_latest=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
-              echo "make_latest=false" >> "$GITHUB_OUTPUT"
-            fi
           fi
+          # fi
 
       - name: Lint
         run: bun run lint
@@ -356,6 +351,9 @@ jobs:
           path: release-publish/*
           if-no-files-found: error
 
+  # Upstream publishes the CLI package to npm as part of the release flow.
+  # This fork intentionally skips npm publication, so the job only runs for
+  # `pingdotgg` and stays here mainly to document the upstream behavior.
   publish_cli:
     name: Publish CLI to npm
     needs: [preflight, build]
@@ -393,6 +391,8 @@ jobs:
 
   release:
     name: Publish GitHub Release
+    # Keep the upstream job dependency so the release waits for npm publication
+    # there, while still allowing this fork to proceed when `publish_cli` is skipped.
     needs: [preflight, build, publish_cli]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' && (needs.publish_cli.result == 'success' || needs.publish_cli.result == 'skipped') }}
     runs-on: ubuntu-24.04 # blacksmith-8vcpu-ubuntu-2404
