@@ -37,6 +37,7 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../remoteRefs.ts";
 import { ServerConfig } from "../../config.ts";
+import { resolveCommandExecution } from "../../wsl.ts";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -681,15 +682,25 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.mapError(toGitCommandError(commandInput, "failed to create trace2 monitor.")),
         );
+        const execution = resolveCommandExecution({
+          command: "git",
+          args: commandInput.args,
+          cwd: commandInput.cwd,
+          env: {
+            ...process.env,
+            ...input.env,
+            ...trace2Monitor.env,
+          },
+          wsl: {
+            shellProfile: true,
+          },
+        });
         const child = yield* commandSpawner
           .spawn(
-            ChildProcess.make("git", commandInput.args, {
-              cwd: commandInput.cwd,
-              env: {
-                ...process.env,
-                ...input.env,
-                ...trace2Monitor.env,
-              },
+            ChildProcess.make(execution.command, [...execution.args], {
+              ...(execution.cwd ? { cwd: execution.cwd } : {}),
+              env: execution.env,
+              shell: execution.shell,
             }),
           )
           .pipe(Effect.mapError(toGitCommandError(commandInput, "failed to spawn.")));

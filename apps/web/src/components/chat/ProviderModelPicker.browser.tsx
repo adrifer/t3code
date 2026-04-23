@@ -426,6 +426,7 @@ describe("ProviderModelPicker", () => {
         { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
       ],
       codex: [{ slug: "gpt-5-codex", name: "GPT-5 Codex" }],
+      copilot: [],
       cursor: [],
       opencode: [],
     } as const;

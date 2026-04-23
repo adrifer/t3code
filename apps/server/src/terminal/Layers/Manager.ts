@@ -29,6 +29,7 @@ import {
   terminalSessionsTotal,
 } from "../../observability/Metrics.ts";
 import { runProcess } from "../../processRunner.ts";
+import { resolveWslExecutionTarget, resolveWslTerminalShell } from "../../wsl.ts";
 import {
   TerminalCwdError,
   TerminalHistoryError,
@@ -271,7 +272,12 @@ function resolveShellCandidates(
   shellResolver: () => string,
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
+  cwd?: string,
 ): ShellCandidate[] {
+  const wslTarget = resolveWslExecutionTarget({ cwd });
+  if (platform === "win32" && wslTarget) {
+    return uniqueShellCandidates([resolveWslTerminalShell(wslTarget)]);
+  }
   const requested = shellCandidateFromCommand(
     normalizeShellCommand(shellResolver(), platform),
     platform,
@@ -1384,7 +1390,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
           Effect.andThen(
             Effect.gen(function* () {
-              const shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
+              const shellCandidates = resolveShellCandidates(
+                shellResolver,
+                platform,
+                baseEnv,
+                session.cwd,
+              );
               const terminalEnv = createTerminalSpawnEnv(baseEnv, session.runtimeEnv);
               const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session);
               ptyProcess = spawnResult.process;

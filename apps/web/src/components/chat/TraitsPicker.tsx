@@ -1,6 +1,7 @@
 import {
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type CopilotModelOptions,
   type CursorModelOptions,
   type OpenCodeModelOptions,
   type ProviderKind,
@@ -58,8 +59,10 @@ function getRawEffort(
   provider: ProviderKind,
   modelOptions: ProviderOptions | null | undefined,
 ): string | null {
-  if (provider === "codex") {
-    return trimOrNull((modelOptions as CodexModelOptions | undefined)?.reasoningEffort);
+  if (provider === "codex" || provider === "copilot") {
+    return trimOrNull(
+      (modelOptions as CodexModelOptions | CopilotModelOptions | undefined)?.reasoningEffort,
+    );
   }
   if (provider === "cursor") {
     return trimOrNull((modelOptions as CursorModelOptions | undefined)?.reasoning);
@@ -71,7 +74,7 @@ function getRawEffort(
 }
 
 function getEffortKey(provider: ProviderKind): string {
-  if (provider === "codex") return "reasoningEffort";
+  if (provider === "codex" || provider === "copilot") return "reasoningEffort";
   if (provider === "cursor") return "reasoning";
   if (provider === "opencode") return "variant";
   return "effort";
@@ -567,7 +570,7 @@ export const TraitsPicker = memo(function TraitsPicker({
             defaultContextWindow)
           : (selectedAgentLabel ?? "");
 
-  const isCodexStyle = provider === "codex";
+  const isCodexStyle = provider !== "claudeAgent";
 
   return (
     <Menu

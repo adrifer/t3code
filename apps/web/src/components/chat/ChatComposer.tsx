@@ -82,6 +82,7 @@ import { basenameOfPath } from "../../vscode-icons";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import { Button } from "../ui/button";
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
@@ -104,6 +105,7 @@ import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
+import { getInteractionModesForProvider, INTERACTION_MODE_LABELS } from "../../interactionModes";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -161,18 +163,20 @@ const terminalContextIdListsEqual = (
   contexts.length === ids.length && contexts.every((context, index) => context.id === ids[index]);
 
 const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
+  provider: ProviderKind;
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   showPlanToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
-  onToggleInteractionMode: () => void;
+  onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onTogglePlanSidebar: () => void;
 }) {
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
+  const interactionModes = getInteractionModesForProvider(props.provider);
 
   return (
     <>
@@ -180,23 +184,39 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
       {props.showInteractionModeToggle ? (
         <>
-          <Button
-            variant="ghost"
-            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-            size="sm"
-            type="button"
-            onClick={props.onToggleInteractionMode}
-            title={
-              props.interactionMode === "plan"
-                ? "Plan mode — click to return to normal build mode"
-                : "Default mode — click to enter plan mode"
-            }
-          >
-            <BotIcon />
-            <span className="sr-only sm:not-sr-only">
-              {props.interactionMode === "plan" ? "Plan" : "Build"}
-            </span>
-          </Button>
+          <Menu>
+            <MenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                  size="sm"
+                  type="button"
+                  title="Interaction mode"
+                >
+                  <BotIcon />
+                  <span className="sr-only sm:not-sr-only">
+                    {INTERACTION_MODE_LABELS[props.interactionMode]}
+                  </span>
+                </Button>
+              }
+            />
+            <MenuPopup align="start">
+              <MenuRadioGroup
+                value={props.interactionMode}
+                onValueChange={(value) => {
+                  if (!value || value === props.interactionMode) return;
+                  props.onInteractionModeChange(value as ProviderInteractionMode);
+                }}
+              >
+                {interactionModes.map((mode) => (
+                  <MenuRadioItem key={mode} value={mode}>
+                    {INTERACTION_MODE_LABELS[mode]}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </MenuPopup>
+          </Menu>
 
           <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
         </>
@@ -616,6 +636,7 @@ export const ChatComposer = memo(
     >(
       () => ({
         codex: providerStatuses.find((provider) => provider.provider === "codex")?.models ?? [],
+        copilot: providerStatuses.find((provider) => provider.provider === "copilot")?.models ?? [],
         claudeAgent:
           providerStatuses.find((provider) => provider.provider === "claudeAgent")?.models ?? [],
         opencode:
@@ -1905,12 +1926,13 @@ export const ChatComposer = memo(
                     <CompactComposerControlsMenu
                       activePlan={showPlanSidebarToggle}
                       interactionMode={interactionMode}
+                      provider={selectedProvider}
                       planSidebarLabel={planSidebarLabel}
                       planSidebarOpen={planSidebarOpen}
                       runtimeMode={runtimeMode}
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                       traitsMenuContent={providerTraitsMenuContent}
-                      onToggleInteractionMode={toggleInteractionMode}
+                      onInteractionModeChange={handleInteractionModeChange}
                       onTogglePlanSidebar={togglePlanSidebar}
                       onRuntimeModeChange={handleRuntimeModeChange}
                     />
@@ -1926,6 +1948,7 @@ export const ChatComposer = memo(
                         </>
                       ) : null}
                       <ComposerFooterModeControls
+                        provider={selectedProvider}
                         showInteractionModeToggle={
                           composerProviderControls.showInteractionModeToggle
                         }
@@ -1934,7 +1957,7 @@ export const ChatComposer = memo(
                         showPlanToggle={showPlanSidebarToggle}
                         planSidebarLabel={planSidebarLabel}
                         planSidebarOpen={planSidebarOpen}
-                        onToggleInteractionMode={toggleInteractionMode}
+                        onInteractionModeChange={handleInteractionModeChange}
                         onRuntimeModeChange={handleRuntimeModeChange}
                         onTogglePlanSidebar={togglePlanSidebar}
                       />

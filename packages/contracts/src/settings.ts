@@ -5,6 +5,7 @@ import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import {
   ClaudeModelOptions,
   CodexModelOptions,
+  CopilotModelOptions,
   CursorModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   OpenCodeModelOptions,
@@ -97,6 +98,15 @@ export const ClaudeSettings = Schema.Struct({
 });
 export type ClaudeSettings = typeof ClaudeSettings.Type;
 
+export const CopilotSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  binaryPath: makeBinaryPathSetting("copilot"),
+  useWsl: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  wslDistro: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+});
+export type CopilotSettings = typeof CopilotSettings.Type;
+
 export const CursorSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   binaryPath: makeBinaryPathSetting("agent"),
@@ -137,6 +147,7 @@ export const ServerSettings = Schema.Struct({
   // Provider specific settings
   providers: Schema.Struct({
     codex: CodexSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    copilot: CopilotSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
@@ -175,6 +186,10 @@ const CodexModelOptionsPatch = Schema.Struct({
   fastMode: Schema.optionalKey(CodexModelOptions.fields.fastMode),
 });
 
+const CopilotModelOptionsPatch = Schema.Struct({
+  reasoningEffort: Schema.optionalKey(CopilotModelOptions.fields.reasoningEffort),
+});
+
 const ClaudeModelOptionsPatch = Schema.Struct({
   thinking: Schema.optionalKey(ClaudeModelOptions.fields.thinking),
   effort: Schema.optionalKey(ClaudeModelOptions.fields.effort),
@@ -199,6 +214,11 @@ const ModelSelectionPatch = Schema.Union([
     provider: Schema.optionalKey(Schema.Literal("codex")),
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(CodexModelOptionsPatch),
+  }),
+  Schema.Struct({
+    provider: Schema.optionalKey(Schema.Literal("copilot")),
+    model: Schema.optionalKey(TrimmedNonEmptyString),
+    options: Schema.optionalKey(CopilotModelOptionsPatch),
   }),
   Schema.Struct({
     provider: Schema.optionalKey(Schema.Literal("claudeAgent")),
@@ -231,6 +251,14 @@ const ClaudeSettingsPatch = Schema.Struct({
   launchArgs: Schema.optionalKey(Schema.String),
 });
 
+const CopilotSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(Schema.String),
+  useWsl: Schema.optionalKey(Schema.Boolean),
+  wslDistro: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
 const CursorSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
@@ -261,6 +289,7 @@ export const ServerSettingsPatch = Schema.Struct({
   providers: Schema.optionalKey(
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
+      copilot: Schema.optionalKey(CopilotSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       cursor: Schema.optionalKey(CursorSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),

@@ -35,6 +35,7 @@ export interface AppModelOption {
   shortName?: string;
   subProvider?: string;
   isCustom: boolean;
+  premiumRequestMultiplier?: string | undefined;
 }
 
 const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConfig> = {
@@ -44,6 +45,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     description: "Save additional Codex model slugs for the picker and `/model` command.",
     placeholder: "your-codex-model-slug",
     example: "gpt-6.7-codex-ultra-preview",
+  },
+  copilot: {
+    provider: "copilot",
+    title: "GitHub Copilot",
+    description: "Save additional Copilot model slugs for the picker and `/model` command.",
+    placeholder: "your-copilot-model-slug",
+    example: "claude-sonnet-4-6",
   },
   claudeAgent: {
     provider: "claudeAgent",
@@ -106,12 +114,13 @@ export function getAppModelOptions(
   selectedModel?: string | null,
 ): AppModelOption[] {
   const options: AppModelOption[] = getProviderModels(providers, provider).map(
-    ({ slug, name, shortName, subProvider, isCustom }) => ({
+    ({ slug, name, shortName, subProvider, isCustom, premiumRequestMultiplier }) => ({
       slug,
       name,
       ...(shortName ? { shortName } : {}),
       ...(subProvider ? { subProvider } : {}),
       isCustom,
+      ...(premiumRequestMultiplier ? { premiumRequestMultiplier } : {}),
     }),
   );
   const seen = new Set(options.map((option) => option.slug));
@@ -181,6 +190,12 @@ export function getCustomModelOptionsByProvider(
       providers,
       "codex",
       selectedProvider === "codex" ? selectedModel : undefined,
+    ),
+    copilot: getAppModelOptions(
+      settings,
+      providers,
+      "copilot",
+      selectedProvider === "copilot" ? selectedModel : undefined,
     ),
     claudeAgent: getAppModelOptions(
       settings,

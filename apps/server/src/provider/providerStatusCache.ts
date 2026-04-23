@@ -4,6 +4,7 @@ import { Cause, Effect, FileSystem, Path, Schema } from "effect";
 
 export const PROVIDER_CACHE_IDS = [
   "codex",
+  "copilot",
   "claudeAgent",
   "opencode",
   "cursor",

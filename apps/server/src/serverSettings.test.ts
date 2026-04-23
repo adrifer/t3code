@@ -214,6 +214,29 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("persists Copilot WSL settings", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      const next = yield* serverSettings.updateSettings({
+        providers: {
+          copilot: {
+            useWsl: true,
+            wslDistro: "  Ubuntu  ",
+          },
+        },
+      });
+
+      assert.deepEqual(next.providers.copilot, {
+        enabled: true,
+        binaryPath: "copilot",
+        useWsl: true,
+        wslDistro: "Ubuntu",
+        customModels: [],
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("trims observability settings when updates are applied", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;

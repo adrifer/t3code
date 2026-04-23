@@ -1043,6 +1043,9 @@ it.layer(TestLayer)("git integration", (it) => {
           branch: `${remoteName}/${featureBranch}`,
         });
 
+        expect(yield* git(source, ["rev-parse", "--abbrev-ref", "@{upstream}"])).toBe(
+          `${remoteName}/${featureBranch}`,
+        );
         expect(checkoutResult.branch).toBe("upstream/feature");
         expect(yield* git(source, ["branch", "--show-current"])).toBe("upstream/feature");
         const realGitCore = yield* GitCore;

@@ -96,6 +96,20 @@ Use this first to validate the release pipeline.
 4. Verify the GitHub Release contains all platform artifacts.
 5. Download each artifact and sanity-check installation on each OS.
 
+## Patch tag helper
+
+If you only need to cut the next stable release tag from the current `HEAD` commit, use the helper script:
+
+1. Create and push the next stable tag to `origin`:
+   - `bun run release:tag`
+
+Notes:
+
+- The helper fetches tags before calculating the next version.
+- Prerelease tags such as `v0.0.0-test.1` are ignored when selecting the base version.
+- The helper creates an annotated tag on the current `HEAD` commit.
+- The helper pushes only the new tag instead of every local tag.
+
 ## 2) Apple signing + notarization setup (macOS)
 
 Required secrets used by the workflow:

@@ -5,6 +5,8 @@ import type { ProviderKind } from "./orchestration.ts";
 export const CODEX_REASONING_EFFORT_OPTIONS = ["xhigh", "high", "medium", "low"] as const;
 export const CodexReasoningEffort = Schema.Literals(CODEX_REASONING_EFFORT_OPTIONS);
 export type CodexReasoningEffort = typeof CodexReasoningEffort.Type;
+export const COPILOT_REASONING_EFFORT_OPTIONS = CODEX_REASONING_EFFORT_OPTIONS;
+export type CopilotReasoningEffort = CodexReasoningEffort;
 export const CLAUDE_AGENT_EFFORT_OPTIONS = [
   "low",
   "medium",
@@ -31,6 +33,11 @@ export const CodexModelOptions = Schema.Struct({
 });
 export type CodexModelOptions = typeof CodexModelOptions.Type;
 
+export const CopilotModelOptions = Schema.Struct({
+  reasoningEffort: Schema.optional(Schema.Literals(COPILOT_REASONING_EFFORT_OPTIONS)),
+});
+export type CopilotModelOptions = typeof CopilotModelOptions.Type;
+
 export const ClaudeModelOptions = Schema.Struct({
   thinking: Schema.optional(Schema.Boolean),
   effort: Schema.optional(ClaudeAgentEffort),
@@ -54,6 +61,7 @@ export type OpenCodeModelOptions = typeof OpenCodeModelOptions.Type;
 
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
+  copilot: Schema.optional(CopilotModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
   cursor: Schema.optional(CursorModelOptions),
   opencode: Schema.optional(OpenCodeModelOptions),
@@ -87,6 +95,7 @@ export type ModelCapabilities = typeof ModelCapabilities.Type;
 
 export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4",
+  copilot: "gpt-5.4",
   claudeAgent: "claude-sonnet-4-6",
   cursor: "auto",
   opencode: "openai/gpt-5",
@@ -97,6 +106,7 @@ export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 /** Per-provider text generation model defaults. */
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4-mini",
+  copilot: "gpt-5.4-mini",
   claudeAgent: "claude-haiku-4-5",
   cursor: "composer-2",
   opencode: "openai/gpt-5",
@@ -110,6 +120,43 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "gpt-5.3": "gpt-5.3-codex",
     "5.3-spark": "gpt-5.3-codex-spark",
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
+  },
+  copilot: {
+    "5.4": "gpt-5.4",
+    "5.4-mini": "gpt-5.4-mini",
+    "gpt-5.4-mini": "gpt-5.4-mini",
+    "5-mini": "gpt-5-mini",
+    "gpt-5-mini": "gpt-5-mini",
+    "5.2": "gpt-5.2",
+    "gpt-5.2": "gpt-5.2",
+    "5.1": "gpt-5.1",
+    "gpt-5.1": "gpt-5.1",
+    "4.1": "gpt-4.1",
+    "gpt-4.1": "gpt-4.1",
+    "5.3": "gpt-5.3-codex",
+    "gpt-5.3": "gpt-5.3-codex",
+    "5.3-spark": "gpt-5.3-codex-spark",
+    "gpt-5.3-spark": "gpt-5.3-codex-spark",
+    "5.2-codex": "gpt-5.2-codex",
+    "gpt-5.2-codex": "gpt-5.2-codex",
+    sonnet: "claude-sonnet-4-6",
+    "sonnet-4.6": "claude-sonnet-4-6",
+    "claude-sonnet-4.6": "claude-sonnet-4-6",
+    "claude-sonnet-4-6-20251117": "claude-sonnet-4-6",
+    "claude-sonnet-4.5": "claude-sonnet-4-5",
+    "claude-sonnet-4": "claude-sonnet-4",
+    haiku: "claude-haiku-4-5",
+    "haiku-4.5": "claude-haiku-4-5",
+    "claude-haiku-4.5": "claude-haiku-4-5",
+    opus: "claude-opus-4-7",
+    "opus-4.7": "claude-opus-4-7",
+    "claude-opus-4.7": "claude-opus-4-7",
+    "opus-4.6": "claude-opus-4-6",
+    "claude-opus-4.6": "claude-opus-4-6",
+    "claude-opus-4-6-20251117": "claude-opus-4-6",
+    "claude-opus-4.6-fast": "claude-opus-4-6-fast",
+    "claude-opus-4.5": "claude-opus-4-5",
+    goldeneye: "goldeneye",
   },
   claudeAgent: {
     opus: "claude-opus-4-7",
@@ -145,6 +192,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
 
 export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   codex: "Codex",
+  copilot: "GitHub Copilot",
   claudeAgent: "Claude",
   cursor: "Cursor",
   opencode: "OpenCode",

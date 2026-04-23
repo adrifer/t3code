@@ -1,4 +1,5 @@
 import { type ChildProcess as ChildProcessHandle, spawn, spawnSync } from "node:child_process";
+import { resolveCommandExecution, type CommandExecutionInput } from "./wsl.ts";
 
 export interface ProcessRunOptions {
   cwd?: string | undefined;
@@ -8,6 +9,7 @@ export interface ProcessRunOptions {
   allowNonZeroExit?: boolean | undefined;
   maxBufferBytes?: number | undefined;
   outputMode?: "error" | "truncate" | undefined;
+  wsl?: CommandExecutionInput["wsl"] | undefined;
 }
 
 export interface ProcessRunResult {
@@ -133,13 +135,20 @@ export async function runProcess(
   const timeoutMs = options.timeoutMs ?? 60_000;
   const maxBufferBytes = options.maxBufferBytes ?? DEFAULT_MAX_BUFFER_BYTES;
   const outputMode = options.outputMode ?? "error";
+  const execution = resolveCommandExecution({
+    command,
+    args,
+    cwd: options.cwd,
+    env: options.env,
+    wsl: options.wsl,
+  });
 
   return new Promise<ProcessRunResult>((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env,
+    const child = spawn(execution.command, execution.args, {
+      cwd: execution.cwd,
+      env: execution.env,
       stdio: "pipe",
-      shell: process.platform === "win32",
+      shell: execution.shell,
     });
 
     let stdout = "";

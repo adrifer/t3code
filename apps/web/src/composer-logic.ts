@@ -1,8 +1,8 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
-export type ComposerTriggerKind = "path" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerTriggerKind = "path" | "slash-command" | "slash-model" | "skill";
+export type ComposerSlashCommand = "model" | "plan" | "default" | "autopilot";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -221,6 +221,16 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
   const linePrefix = text.slice(lineStart, cursor);
 
   if (linePrefix.startsWith("/")) {
+    const modelMatch = /^\/model(?:\s+(.*))?$/.exec(linePrefix);
+    if (modelMatch) {
+      return {
+        kind: "slash-model",
+        query: (modelMatch[1] ?? "").trim(),
+        rangeStart: lineStart,
+        rangeEnd: cursor,
+      };
+    }
+
     const commandMatch = /^\/(\S*)$/.exec(linePrefix);
     if (commandMatch) {
       const commandQuery = commandMatch[1] ?? "";
@@ -258,12 +268,13 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 export function parseStandaloneComposerSlashCommand(
   text: string,
 ): Exclude<ComposerSlashCommand, "model"> | null {
-  const match = /^\/(plan|default)\s*$/i.exec(text.trim());
+  const match = /^\/(plan|default|autopilot)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
   }
   const command = match[1]?.toLowerCase();
   if (command === "plan") return "plan";
+  if (command === "autopilot") return "autopilot";
   return "default";
 }
 

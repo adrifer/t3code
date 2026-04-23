@@ -18,6 +18,7 @@ import {
 } from "../Services/TextGeneration.ts";
 import { CodexTextGenerationLive } from "./CodexTextGeneration.ts";
 import { ClaudeTextGenerationLive } from "./ClaudeTextGeneration.ts";
+import { CopilotTextGenerationLive } from "./CopilotTextGeneration.ts";
 import { CursorTextGenerationLive } from "./CursorTextGeneration.ts";
 import { OpenCodeTextGenerationLive } from "./OpenCodeTextGeneration.ts";
 
@@ -31,6 +32,10 @@ class CodexTextGen extends Context.Service<CodexTextGen, TextGenerationShape>()(
 
 class ClaudeTextGen extends Context.Service<ClaudeTextGen, TextGenerationShape>()(
   "t3/git/Layers/RoutingTextGeneration/ClaudeTextGen",
+) {}
+
+class CopilotTextGen extends Context.Service<CopilotTextGen, TextGenerationShape>()(
+  "t3/git/Layers/RoutingTextGeneration/CopilotTextGen",
 ) {}
 
 class CursorTextGen extends Context.Service<CursorTextGen, TextGenerationShape>()(
@@ -47,6 +52,7 @@ class OpenCodeTextGen extends Context.Service<OpenCodeTextGen, TextGenerationSha
 
 const makeRoutingTextGeneration = Effect.gen(function* () {
   const codex = yield* CodexTextGen;
+  const copilot = yield* CopilotTextGen;
   const claude = yield* ClaudeTextGen;
   const cursor = yield* CursorTextGen;
   const openCode = yield* OpenCodeTextGen;
@@ -54,11 +60,13 @@ const makeRoutingTextGeneration = Effect.gen(function* () {
   const route = (provider?: TextGenerationProvider): TextGenerationShape =>
     provider === "claudeAgent"
       ? claude
-      : provider === "opencode"
-        ? openCode
-        : provider === "cursor"
-          ? cursor
-          : codex;
+      : provider === "copilot"
+        ? copilot
+        : provider === "opencode"
+          ? openCode
+          : provider === "cursor"
+            ? cursor
+            : codex;
 
   return {
     generateCommitMessage: (input) =>
@@ -85,6 +93,14 @@ const InternalClaudeLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ClaudeTextGenerationLive));
 
+const InternalCopilotLayer = Layer.effect(
+  CopilotTextGen,
+  Effect.gen(function* () {
+    const svc = yield* TextGeneration;
+    return svc;
+  }),
+).pipe(Layer.provide(CopilotTextGenerationLive));
+
 const InternalCursorLayer = Layer.effect(
   CursorTextGen,
   Effect.gen(function* () {
@@ -106,6 +122,7 @@ export const RoutingTextGenerationLive = Layer.effect(
   makeRoutingTextGeneration,
 ).pipe(
   Layer.provide(InternalCodexLayer),
+  Layer.provide(InternalCopilotLayer),
   Layer.provide(InternalClaudeLayer),
   Layer.provide(InternalCursorLayer),
   Layer.provide(InternalOpenCodeLayer),

@@ -4,6 +4,7 @@ import {
   type ClaudeAgentEffort,
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type CopilotModelOptions,
   type CursorModelOptions,
   type ModelCapabilities,
   type ModelSelection,
@@ -15,7 +16,19 @@ import {
 export interface SelectableModelOption {
   slug: string;
   name: string;
+  premiumRequestMultiplier?: string | undefined;
 }
+
+const COPILOT_API_MODEL_IDS: Record<string, string> = {
+  "claude-sonnet-4-6": "claude-sonnet-4.6",
+  "claude-sonnet-4-5": "claude-sonnet-4.5",
+  "claude-sonnet-4": "claude-sonnet-4",
+  "claude-haiku-4-5": "claude-haiku-4.5",
+  "claude-opus-4-7": "claude-opus-4.7",
+  "claude-opus-4-6": "claude-opus-4.6",
+  "claude-opus-4-6-fast": "claude-opus-4.6-fast",
+  "claude-opus-4-5": "claude-opus-4.5",
+};
 
 /** Check whether a capabilities object includes a given effort value. */
 export function hasEffortLevel(caps: ModelCapabilities, value: string): boolean {
@@ -107,6 +120,17 @@ export function normalizeClaudeModelOptionsWithCapabilities(
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 
+export function normalizeCopilotModelOptionsWithCapabilities(
+  caps: ModelCapabilities,
+  modelOptions: CopilotModelOptions | null | undefined,
+): CopilotModelOptions | undefined {
+  const reasoningEffort = resolveEffort(caps, modelOptions?.reasoningEffort);
+  const nextOptions: CopilotModelOptions = reasoningEffort
+    ? { reasoningEffort: reasoningEffort as CopilotModelOptions["reasoningEffort"] }
+    : {};
+  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
 export function normalizeCursorModelOptionsWithCapabilities(
   caps: ModelCapabilities,
   modelOptions: CursorModelOptions | null | undefined,
@@ -158,6 +182,11 @@ export function normalizeProviderModelOptionsWithCapabilities(
   switch (provider) {
     case "codex":
       return normalizeCodexModelOptionsWithCapabilities(caps, modelOptions as CodexModelOptions);
+    case "copilot":
+      return normalizeCopilotModelOptionsWithCapabilities(
+        caps,
+        modelOptions as CopilotModelOptions,
+      );
     case "claudeAgent":
       return normalizeClaudeModelOptionsWithCapabilities(caps, modelOptions as ClaudeModelOptions);
     case "cursor":
@@ -249,6 +278,60 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
   return trimmed || null;
 }
 
+export function makeModelSelection(
+  provider: ProviderKind,
+  model: string,
+  options?: ProviderModelOptions[ProviderKind],
+): ModelSelection {
+  switch (provider) {
+    case "codex":
+      return options
+        ? { provider, model, options: options as CodexModelOptions }
+        : { provider, model };
+    case "copilot":
+      return options
+        ? { provider, model, options: options as CopilotModelOptions }
+        : { provider, model };
+    case "claudeAgent":
+      return options
+        ? { provider, model, options: options as ClaudeModelOptions }
+        : { provider, model };
+    case "cursor":
+      return options
+        ? { provider, model, options: options as CursorModelOptions }
+        : { provider, model };
+    case "opencode":
+      return options
+        ? { provider, model, options: options as OpenCodeModelOptions }
+        : { provider, model };
+  }
+}
+
+/**
+ * Resolve the actual API model identifier from a model selection.
+ *
+ * Provider-aware: each provider can map `contextWindow` (or other options)
+ * to whatever the API requires — a model-id suffix, a separate parameter, etc.
+ * The canonical slug stored in the selection stays unchanged so the
+ * capabilities system keeps working.
+ */
+export function resolveApiModelId(modelSelection: ModelSelection): string {
+  switch (modelSelection.provider) {
+    case "claudeAgent": {
+      switch (modelSelection.options?.contextWindow) {
+        case "1m":
+          return `${modelSelection.model}[1m]`;
+        default:
+          return modelSelection.model;
+      }
+    }
+    case "copilot":
+      return COPILOT_API_MODEL_IDS[modelSelection.model] ?? modelSelection.model;
+    default:
+      return modelSelection.model;
+  }
+}
+
 export function createModelSelection(
   provider: ProviderKind,
   model: string,
@@ -260,6 +343,12 @@ export function createModelSelection(
         provider,
         model,
         ...(options ? { options: options as CodexModelOptions } : {}),
+      };
+    case "copilot":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as CopilotModelOptions } : {}),
       };
     case "claudeAgent":
       return {
