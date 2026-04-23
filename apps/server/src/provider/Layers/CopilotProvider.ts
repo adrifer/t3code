@@ -389,7 +389,7 @@ export const CopilotProviderLive = Layer.effect(
           onSome: (pty) =>
             probeCopilotModelCatalog(settings).pipe(
               Effect.provideService(PtyAdapter, pty),
-              Effect.timeoutOption("8 seconds"),
+              Effect.timeoutOption("10 seconds"),
               Effect.map((option) => (Option.isSome(option) ? option.value : null)),
               Effect.catch(() => Effect.succeed(null)),
             ),

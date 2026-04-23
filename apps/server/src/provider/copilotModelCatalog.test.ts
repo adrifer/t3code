@@ -55,4 +55,31 @@ describe("parseCopilotModelPickerOutput", () => {
       },
     ]);
   });
+
+  it("parses the first real model when the Auto picker row is active", () => {
+    const output = `
+      Select Model
+      Search models...
+      ❯ Auto  Claude Sonnet 4.6                                  1x  Claude Sonnet 4.5                                  1x  Claude Opus 4.7                                  7.5x
+      ↑↓ to navigate · Tab switch tab · Enter to select · Esc to cancel
+    `;
+
+    expect(parseCopilotModelPickerOutput(output)).toEqual([
+      {
+        slug: "claude-sonnet-4-6",
+        name: "Claude Sonnet 4.6",
+        premiumRequestMultiplier: "1x",
+      },
+      {
+        slug: "claude-sonnet-4-5",
+        name: "Claude Sonnet 4.5",
+        premiumRequestMultiplier: "1x",
+      },
+      {
+        slug: "claude-opus-4-7",
+        name: "Claude Opus 4.7",
+        premiumRequestMultiplier: "7.5x",
+      },
+    ]);
+  });
 });

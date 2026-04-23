@@ -38,6 +38,11 @@ export const FALLBACK_COPILOT_MODEL_CATALOG: ReadonlyArray<CopilotModelCatalogEn
 const MODEL_PICKER_READY_MARKERS = ["Select Model", "Search models..."] as const;
 const MODEL_PICKER_FOOTER_MARKERS = ["↑↓ to navigate", "Esc to cancel"] as const;
 const MODEL_PICKER_SECTION_START = "Search models...";
+const KNOWN_COPILOT_MODEL_NAME_PATTERNS = [
+  /Claude\s+(?:Sonnet|Opus|Haiku)\s+\d+(?:\.\d+)?(?:\s*\([^)]*\))*/gi,
+  /GPT-[A-Za-z0-9.-]+(?:\s+mini)?/gi,
+  /Goldeneye(?:\s*\([^)]*\))*/gi,
+] as const;
 const OSC_CONTROL_SEQUENCE = new RegExp(String.raw`\u001b\][\s\S]*?(?:\u0007|\u001b\\)`, "g");
 const STRING_CONTROL_SEQUENCE = new RegExp(String.raw`\u001b[P^_][\s\S]*?(?:\u0007|\u001b\\)`, "g");
 const CSI_CONTROL_SEQUENCE = new RegExp(String.raw`\u001b\[[0-?]*[ -/]*[@-~]`, "g");
@@ -63,8 +68,7 @@ function cleanCopilotModelDisplayName(input: string): string {
     .trim();
 }
 
-function slugFromCopilotModelDisplayName(displayName: string): string | null {
-  const normalized = cleanCopilotModelDisplayName(displayName);
+function slugFromNormalizedCopilotModelDisplayName(normalized: string): string | null {
   if (!normalized) {
     return null;
   }
@@ -95,6 +99,37 @@ function slugFromCopilotModelDisplayName(displayName: string): string | null {
     slug += "-fast";
   }
   return slug;
+}
+
+function extractCopilotModelDisplayName(input: string): string {
+  const normalized = cleanCopilotModelDisplayName(input);
+  if (slugFromNormalizedCopilotModelDisplayName(normalized)) {
+    return normalized;
+  }
+
+  let bestMatch: string | null = null;
+  let bestIndex = -1;
+
+  for (const pattern of KNOWN_COPILOT_MODEL_NAME_PATTERNS) {
+    for (const match of normalized.matchAll(pattern)) {
+      const matchedDisplayName = cleanCopilotModelDisplayName(match[0] ?? "");
+      if (!matchedDisplayName) {
+        continue;
+      }
+
+      const index = match.index ?? -1;
+      if (index >= bestIndex) {
+        bestMatch = matchedDisplayName;
+        bestIndex = index;
+      }
+    }
+  }
+
+  return bestMatch ?? normalized;
+}
+
+function slugFromCopilotModelDisplayName(displayName: string): string | null {
+  return slugFromNormalizedCopilotModelDisplayName(cleanCopilotModelDisplayName(displayName));
 }
 
 function extractModelPickerSection(output: string): string | null {
@@ -129,7 +164,7 @@ export function parseCopilotModelPickerOutput(
   const matcher = /(?:❯\s*)?([A-Za-z0-9][A-Za-z0-9 .()/-]*?)\s{2,}(\d+(?:\.\d+)?x)\b/g;
 
   for (const match of section.matchAll(matcher)) {
-    const displayName = cleanCopilotModelDisplayName(match[1] ?? "");
+    const displayName = extractCopilotModelDisplayName(match[1] ?? "");
     const premiumRequestMultiplier = match[2]?.trim();
     const slug = slugFromCopilotModelDisplayName(displayName);
 
