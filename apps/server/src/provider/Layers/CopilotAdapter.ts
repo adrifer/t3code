@@ -194,6 +194,7 @@ interface CopilotSessionContext {
   readonly sdkSession: CopilotSdkSessionShape;
   readonly unsubscribeEvents: () => void;
   readonly initialResumeCursor: unknown | undefined;
+  readonly ignoredPermissionRequestIds: Set<string>;
   readonly permissionQueueBySignature: Map<string, PendingPermissionRequest[]>;
   readonly waitingPermissionResolvers: Map<
     string,
@@ -649,6 +650,27 @@ function permissionResolutionToDecision(
       return "cancel";
     default:
       return undefined;
+  }
+}
+
+function shouldAutoApprovePermissionRequest(
+  runtimeMode: ProviderSession["runtimeMode"],
+  request: Pick<SdkPermissionRequest, "kind">,
+): boolean {
+  if (runtimeMode === "full-access") {
+    return true;
+  }
+
+  if (runtimeMode !== "auto-accept-edits") {
+    return false;
+  }
+
+  switch (request.kind) {
+    case "read":
+    case "write":
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -1428,6 +1450,16 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
             pushMapQueue(context.permissionQueueBySignature, pending.signature, pending);
           }
 
+          if (
+            shouldAutoApprovePermissionRequest(
+              context.session.runtimeMode,
+              event.data.permissionRequest,
+            )
+          ) {
+            context.ignoredPermissionRequestIds.add(pending.requestId);
+            return;
+          }
+
           yield* offerRuntimeEvent({
             ...buildEventBase({
               threadId: context.session.threadId,
@@ -1454,6 +1486,9 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
               pending.signature,
               (candidate) => candidate.requestId === pending.requestId,
             );
+          }
+          if (context.ignoredPermissionRequestIds.delete(event.data.requestId)) {
+            return;
           }
           yield* offerRuntimeEvent({
             ...buildEventBase({
@@ -1720,6 +1755,11 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         pushMapQueue(context.waitingPermissionResolvers, signature, resolve);
       }));
 
+    if (shouldAutoApprovePermissionRequest(context.session.runtimeMode, request)) {
+      context.ignoredPermissionRequestIds.add(pending.requestId);
+      return toPermissionDecision(pending.request, "acceptForSession");
+    }
+
     return toPermissionDecision(pending.request, await pending.decision.promise);
   };
 
@@ -1842,6 +1882,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       const workingDirectory = translateCopilotWorkingDirectory(input.cwd, launch.executionTarget);
       const sessionConfig: SessionConfig = {
         model: resolveApiModelId(modelSelection),
+        streaming: true,
         ...(normalizedOptions?.reasoningEffort
           ? { reasoningEffort: normalizedOptions.reasoningEffort as CopilotReasoningEffort }
           : {}),
@@ -1913,6 +1954,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         sdkSession,
         unsubscribeEvents,
         initialResumeCursor: input.resumeCursor,
+        ignoredPermissionRequestIds: new Set(),
         permissionQueueBySignature: new Map(),
         waitingPermissionResolvers: new Map(),
         userInputQueueBySignature: new Map(),

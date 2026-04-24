@@ -1,11 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { SessionConfig, SessionEvent } from "@github/copilot-sdk";
-import {
-  ApprovalRequestId,
-  type CopilotSettings,
-  ProviderRuntimeEvent,
-  ThreadId,
-} from "@t3tools/contracts";
+import { type CopilotSettings, ProviderRuntimeEvent, ThreadId } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Stream } from "effect";
 
@@ -315,11 +310,28 @@ describe("CopilotAdapterLive", () => {
     }).pipe(Effect.provide(harness.layer));
   });
 
-  it.effect("bridges permission requests through adapter responses", () => {
+  it.effect("enables SDK streaming for Copilot sessions", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* CopilotAdapter;
-      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "copilot",
+        runtimeMode: "full-access",
+      });
+
+      const createConfig = harness.client.createConfigs[0];
+      assert.equal(createConfig?.streaming, true);
+      assert.equal(createConfig?.includeSubAgentStreamingEvents, true);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("auto-approves permission requests in full-access mode without action events", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* CopilotAdapter;
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 7).pipe(
         Stream.runCollect,
         Effect.forkChild,
       );
@@ -379,17 +391,6 @@ describe("CopilotAdapterLive", () => {
         },
       });
 
-      yield* adapter.respondToRequest(
-        THREAD_ID,
-        ApprovalRequestId.make("permission-1"),
-        "acceptForSession",
-      );
-      const permissionResult = yield* Effect.promise(() => Promise.resolve(permissionPromise));
-      assert.deepEqual(permissionResult, {
-        kind: "approve-for-session",
-        approval: { kind: "commands", commandIdentifiers: ["git"] },
-      });
-
       harness.session.emit({
         type: "permission.completed",
         id: "evt-permission-completed",
@@ -410,22 +411,23 @@ describe("CopilotAdapterLive", () => {
         data: {},
       });
 
+      const permissionResult = yield* Effect.promise(() => Promise.resolve(permissionPromise));
+      assert.deepEqual(permissionResult, {
+        kind: "approve-for-session",
+        approval: { kind: "commands", commandIdentifiers: ["git"] },
+      });
+
       const runtimeEvents = Array.from(
         yield* Fiber.join(runtimeEventsFiber),
       ) as ProviderRuntimeEvent[];
-      const requestOpened = runtimeEvents.find((event) => event.type === "request.opened");
-      assert.equal(requestOpened?.type, "request.opened");
-      if (requestOpened?.type !== "request.opened") {
-        return;
-      }
-      assert.equal(requestOpened.payload.requestType, "command_execution_approval");
-
-      const requestResolved = runtimeEvents.find((event) => event.type === "request.resolved");
-      assert.equal(requestResolved?.type, "request.resolved");
-      if (requestResolved?.type !== "request.resolved") {
-        return;
-      }
-      assert.equal(requestResolved.payload.decision, "acceptForSession");
+      assert.equal(
+        runtimeEvents.some((event) => event.type === "request.opened"),
+        false,
+      );
+      assert.equal(
+        runtimeEvents.some((event) => event.type === "request.resolved"),
+        false,
+      );
     }).pipe(Effect.provide(harness.layer));
   });
 
