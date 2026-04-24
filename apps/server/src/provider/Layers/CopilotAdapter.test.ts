@@ -310,6 +310,31 @@ describe("CopilotAdapterLive", () => {
     }).pipe(Effect.provide(harness.layer));
   });
 
+  it.effect("maps autopilot interaction mode to Copilot SDK autopilot mode", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* CopilotAdapter;
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "copilot",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "Implement the change autonomously",
+        interactionMode: "autopilot",
+        modelSelection: {
+          provider: "copilot",
+          model: "gpt-5.4",
+        },
+      });
+
+      assert.deepEqual(harness.session.modeChanges, ["autopilot"]);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
   it.effect("enables SDK streaming for Copilot sessions", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
