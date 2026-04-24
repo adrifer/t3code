@@ -10,6 +10,7 @@ import type {
   RuntimeMode,
   ScopedThreadRef,
   ServerProvider,
+  ServerProviderSlashCommand,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -511,6 +512,7 @@ export interface ChatComposerProps {
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleCopilotRemoteSteeringChange: (enabled: boolean) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
+  handleProviderSlashCommandAction: (command: ServerProviderSlashCommand) => boolean;
   togglePlanSidebar: () => void;
 
   focusComposer: () => void;
@@ -587,6 +589,7 @@ export const ChatComposer = memo(
       handleRuntimeModeChange,
       handleCopilotRemoteSteeringChange,
       handleInteractionModeChange,
+      handleProviderSlashCommandAction,
       togglePlanSidebar,
       focusComposer,
       scheduleComposerFocus,
@@ -1433,6 +1436,17 @@ export const ChatComposer = memo(
           return;
         }
         if (item.type === "provider-slash-command") {
+          if (item.command.action && item.command.action !== "insert-text") {
+            const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+              expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+            });
+            if (applied) {
+              setComposerHighlightedItemId(null);
+              handleProviderSlashCommandAction(item.command);
+            }
+            return;
+          }
+
           const replacement = `/${item.command.name} `;
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
             snapshot.value,

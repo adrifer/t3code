@@ -66,12 +66,42 @@ export const ServerProviderSlashCommandInput = Schema.Struct({
 });
 export type ServerProviderSlashCommandInput = typeof ServerProviderSlashCommandInput.Type;
 
+export const ServerProviderSlashCommandAction = Schema.Literals([
+  "insert-text",
+  "copilot.remote.toggle",
+  "copilot.usage.show",
+  "copilot.context.show",
+  "copilot.compact",
+  "copilot.agent.select",
+  "copilot.fleet.start",
+  "thread.undo",
+  "thread.rewind",
+]);
+export type ServerProviderSlashCommandAction = typeof ServerProviderSlashCommandAction.Type;
+
 export const ServerProviderSlashCommand = Schema.Struct({
   name: TrimmedNonEmptyString,
   description: Schema.optional(TrimmedNonEmptyString),
   input: Schema.optional(ServerProviderSlashCommandInput),
+  action: Schema.optional(ServerProviderSlashCommandAction),
 });
 export type ServerProviderSlashCommand = typeof ServerProviderSlashCommand.Type;
+
+export const ServerProviderQuotaSnapshot = Schema.Struct({
+  entitlementRequests: NonNegativeInt,
+  usedRequests: NonNegativeInt,
+  remainingPercentage: Schema.Number,
+  overage: NonNegativeInt,
+  overageAllowedWithExhaustedQuota: Schema.Boolean,
+  resetDate: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerProviderQuotaSnapshot = typeof ServerProviderQuotaSnapshot.Type;
+
+export const ServerProviderQuota = Schema.Record(
+  TrimmedNonEmptyString,
+  ServerProviderQuotaSnapshot,
+);
+export type ServerProviderQuota = typeof ServerProviderQuota.Type;
 
 export const ServerProviderSkill = Schema.Struct({
   name: TrimmedNonEmptyString,
@@ -98,6 +128,7 @@ export const ServerProvider = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  quota: Schema.optional(ServerProviderQuota),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 

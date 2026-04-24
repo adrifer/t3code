@@ -3,6 +3,8 @@ import type {
   CopilotSettings,
   ServerProviderAuth,
   ServerProviderModel,
+  ServerProviderQuota,
+  ServerProviderSlashCommand,
   ServerProviderState,
 } from "@t3tools/contracts";
 import { Duration, Effect, Equal, Layer, Option, Stream } from "effect";
@@ -33,6 +35,49 @@ import { ProviderAdapterRequestError } from "../Errors.ts";
 const PROVIDER = "copilot" as const;
 const COPILOT_AUTH_TOKEN_ENV_VARS = ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const;
 const SDK_STATUS_TIMEOUT = Duration.millis(DEFAULT_TIMEOUT_MS * 2);
+
+const COPILOT_SLASH_COMMANDS: ReadonlyArray<ServerProviderSlashCommand> = [
+  {
+    name: "remote",
+    description: "Toggle GitHub.com continuation for this Copilot session",
+    action: "copilot.remote.toggle",
+  },
+  {
+    name: "usage",
+    description: "Show Copilot quota and usage",
+    action: "copilot.usage.show",
+  },
+  {
+    name: "context",
+    description: "Show current context window usage",
+    action: "copilot.context.show",
+  },
+  {
+    name: "compact",
+    description: "Compact this Copilot session context",
+    action: "copilot.compact",
+  },
+  {
+    name: "agent",
+    description: "Select a Copilot custom agent",
+    action: "copilot.agent.select",
+  },
+  {
+    name: "fleet",
+    description: "Start Copilot fleet mode",
+    action: "copilot.fleet.start",
+  },
+  {
+    name: "undo",
+    description: "Revert the latest T3 checkpoint",
+    action: "thread.undo",
+  },
+  {
+    name: "rewind",
+    description: "Revert this thread to an earlier T3 checkpoint",
+    action: "thread.rewind",
+  },
+];
 
 function buildCopilotProviderModel(entry: CopilotModelCatalogEntry): ServerProviderModel {
   return {
@@ -66,6 +111,7 @@ function createInitialCopilotProviderSnapshot(settings: CopilotSettings) {
       enabled: false,
       checkedAt,
       models,
+      slashCommands: COPILOT_SLASH_COMMANDS,
       probe: {
         installed: false,
         version: null,
@@ -81,6 +127,7 @@ function createInitialCopilotProviderSnapshot(settings: CopilotSettings) {
     enabled: true,
     checkedAt,
     models,
+    slashCommands: COPILOT_SLASH_COMMANDS,
     probe: {
       installed: true,
       version: null,
@@ -149,6 +196,66 @@ function providerModelsFromSdk(
   return resolved.length > 0 ? resolved : BUILT_IN_MODELS;
 }
 
+function normalizeCopilotQuota(value: unknown): ServerProviderQuota | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const quotaSnapshots = (value as { readonly quotaSnapshots?: unknown }).quotaSnapshots;
+  if (!quotaSnapshots || typeof quotaSnapshots !== "object" || Array.isArray(quotaSnapshots)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(quotaSnapshots).flatMap(([key, snapshot]) => {
+    if (!key.trim() || !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+      return [];
+    }
+
+    const record = snapshot as Record<string, unknown>;
+    const entitlementRequests = record.entitlementRequests;
+    const usedRequests = record.usedRequests;
+    const remainingPercentage = record.remainingPercentage;
+    const overage = record.overage;
+    const overageAllowedWithExhaustedQuota = record.overageAllowedWithExhaustedQuota;
+    const resetDate = record.resetDate;
+
+    if (
+      typeof entitlementRequests !== "number" ||
+      !Number.isFinite(entitlementRequests) ||
+      entitlementRequests < 0 ||
+      typeof usedRequests !== "number" ||
+      !Number.isFinite(usedRequests) ||
+      usedRequests < 0 ||
+      typeof remainingPercentage !== "number" ||
+      !Number.isFinite(remainingPercentage) ||
+      typeof overage !== "number" ||
+      !Number.isFinite(overage) ||
+      overage < 0 ||
+      typeof overageAllowedWithExhaustedQuota !== "boolean"
+    ) {
+      return [];
+    }
+
+    return [
+      [
+        key,
+        {
+          entitlementRequests,
+          usedRequests,
+          remainingPercentage,
+          overage,
+          overageAllowedWithExhaustedQuota,
+          ...(typeof resetDate === "string" && resetDate.trim()
+            ? { resetDate: resetDate.trim() }
+            : {}),
+        },
+      ],
+    ] satisfies ReadonlyArray<readonly [string, ServerProviderQuota[string]]>;
+  });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 function isCommandMissingError(cause: unknown): boolean {
   if (!(cause instanceof Error)) {
     return false;
@@ -188,7 +295,7 @@ const probeCopilotSdkStatus = Effect.fn("probeCopilotSdkStatus")(function* (
 
       try {
         await client.start();
-        const [status, authStatus, models] = await Promise.all([
+        const [status, authStatus, models, quota] = await Promise.all([
           client.getStatus(),
           client.getAuthStatus().catch(() => null),
           client.listModels().catch(() => null),
@@ -199,6 +306,7 @@ const probeCopilotSdkStatus = Effect.fn("probeCopilotSdkStatus")(function* (
           version: status.version,
           authProbe: environmentAuth ?? (authStatus ? mapSdkAuthStatus(authStatus) : null),
           models,
+          quota: normalizeCopilotQuota(quota),
         };
       } finally {
         await stopCopilotClient(client);
@@ -221,6 +329,7 @@ const probeCopilotSdkStatus = Effect.fn("probeCopilotSdkStatus")(function* (
       status: "warning" as const,
       auth: environmentAuth?.auth ?? ({ status: "unknown" } satisfies ServerProviderAuth),
       models: BUILT_IN_MODELS,
+      quota: undefined,
       message: "Timed out while checking GitHub Copilot SDK status.",
     };
   }
@@ -231,6 +340,7 @@ const probeCopilotSdkStatus = Effect.fn("probeCopilotSdkStatus")(function* (
     status: (result.value.authProbe?.status ?? "ready") as Exclude<ServerProviderState, "disabled">,
     auth: result.value.authProbe?.auth ?? ({ status: "unknown" } satisfies ServerProviderAuth),
     models: providerModelsFromSdk(result.value.models),
+    quota: result.value.quota,
     ...(result.value.authProbe?.message ? { message: result.value.authProbe.message } : {}),
   };
 });
@@ -263,6 +373,7 @@ export const checkCopilotProviderStatus = Effect.gen(function* () {
       enabled: false,
       checkedAt,
       models: defaultModels,
+      slashCommands: COPILOT_SLASH_COMMANDS,
       probe: {
         installed: false,
         version: null,
@@ -282,6 +393,7 @@ export const checkCopilotProviderStatus = Effect.gen(function* () {
           status: "error" as const,
           auth: { status: "unknown" } satisfies ServerProviderAuth,
           models: BUILT_IN_MODELS,
+          quota: undefined,
           message:
             "GitHub Copilot CLI is not installed or is not on PATH. Install it or set a custom binary path.",
         });
@@ -307,11 +419,13 @@ export const checkCopilotProviderStatus = Effect.gen(function* () {
       copilotSettings.customModels,
       COPILOT_DEFAULT_MODEL_CAPABILITIES,
     ),
+    slashCommands: COPILOT_SLASH_COMMANDS,
     probe: {
       installed: probe.installed,
       version: probe.version,
       status: probe.status,
       auth: probe.auth,
+      ...(probe.quota ? { quota: probe.quota } : {}),
       ...(probe.message ? { message: probe.message } : {}),
     },
   });

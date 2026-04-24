@@ -5,6 +5,7 @@ import type {
   ServerProviderSkill,
   ServerProviderSlashCommand,
   ServerProviderModel,
+  ServerProviderQuota,
   ServerProviderState,
 } from "@t3tools/contracts";
 import { Effect, Stream } from "effect";
@@ -26,6 +27,7 @@ export interface ProviderProbeResult {
   readonly status: Exclude<ServerProviderState, "disabled">;
   readonly auth: ServerProviderAuth;
   readonly message?: string;
+  readonly quota?: ServerProviderQuota;
 }
 
 export function nonEmptyTrimmed(value: string | undefined): string | undefined {
@@ -148,6 +150,7 @@ export function buildServerProvider(input: {
     models: input.models,
     slashCommands: [...(input.slashCommands ?? [])],
     skills: [...(input.skills ?? [])],
+    ...(input.probe.quota ? { quota: input.probe.quota } : {}),
   };
 }
 

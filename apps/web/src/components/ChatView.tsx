@@ -10,6 +10,7 @@ import {
   type ProjectId,
   type ProviderApprovalDecision,
   type ServerProvider,
+  type ServerProviderSlashCommand,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
@@ -114,6 +115,7 @@ import { getProviderModelCapabilities, resolveSelectableProvider } from "../prov
 import { useSettings } from "../hooks/useSettings";
 import { resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { deriveLatestContextWindowSnapshot, formatContextWindowTokens } from "../lib/contextWindow";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
 import {
   useSavedEnvironmentRegistryStore,
@@ -182,6 +184,27 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+
+function formatCopilotQuotaDescription(provider: ServerProvider | undefined): string | null {
+  const quota = provider?.quota;
+  if (!quota) {
+    return null;
+  }
+
+  const entries = Object.entries(quota).sort(([left], [right]) => left.localeCompare(right));
+  if (entries.length === 0) {
+    return null;
+  }
+
+  return entries
+    .map(([name, snapshot]) => {
+      const reset = snapshot.resetDate ? `, resets ${snapshot.resetDate}` : "";
+      return `${name}: ${snapshot.usedRequests}/${snapshot.entitlementRequests} used, ${Math.round(
+        snapshot.remainingPercentage,
+      )}% remaining${reset}`;
+    })
+    .join("\n");
+}
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
@@ -1058,6 +1081,9 @@ export default function ChatView(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? "codex",
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
+  const selectedProviderStatus = providerStatuses.find(
+    (provider) => provider.provider === selectedProvider,
+  );
   const phase = derivePhase(activeThread?.session ?? null);
   const copilotRemoteSteering =
     composerCopilotRemoteSteering ?? activeThread?.session?.remoteSteerable ?? false;
@@ -2419,6 +2445,132 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const handleProviderSlashCommandAction = useCallback(
+    (command: ServerProviderSlashCommand): boolean => {
+      const action = command.action ?? "insert-text";
+      if (action === "insert-text") {
+        return false;
+      }
+
+      const addInfoToast = (
+        title: string,
+        description: string,
+        type: "info" | "warning" = "info",
+      ) =>
+        toastManager.add(
+          stackedThreadToast({
+            type,
+            title,
+            description,
+          }),
+        );
+
+      switch (action) {
+        case "copilot.remote.toggle": {
+          if (selectedProvider !== "copilot") {
+            addInfoToast(
+              "Copilot remote unavailable",
+              "Switch to Copilot before using /remote.",
+              "warning",
+            );
+            return true;
+          }
+          if (!copilotRemoteSteeringSupported) {
+            addInfoToast(
+              "Copilot remote unavailable",
+              "Remote steering toggling is not exposed by the current Copilot SDK/CLI.",
+              "warning",
+            );
+            return true;
+          }
+          const enabled = !copilotRemoteSteering;
+          handleCopilotRemoteSteeringChange(enabled);
+          addInfoToast(
+            enabled ? "Copilot remote enabled" : "Copilot remote disabled",
+            enabled
+              ? "You can continue this Copilot session from GitHub.com."
+              : "GitHub.com continuation is disabled for this Copilot session.",
+          );
+          return true;
+        }
+        case "copilot.usage.show": {
+          const description = formatCopilotQuotaDescription(selectedProviderStatus);
+          addInfoToast(
+            "Copilot usage",
+            description ?? "Copilot quota is not available from the current provider status yet.",
+            description ? "info" : "warning",
+          );
+          return true;
+        }
+        case "copilot.context.show": {
+          const context = deriveLatestContextWindowSnapshot(threadActivities);
+          if (!context) {
+            addInfoToast(
+              "Context window",
+              "No context usage has been reported for this thread yet.",
+              "warning",
+            );
+            return true;
+          }
+          const percentage =
+            context.usedPercentage !== null ? `${Math.round(context.usedPercentage)}%` : null;
+          const maxTokens =
+            context.maxTokens != null ? `/${formatContextWindowTokens(context.maxTokens)}` : "";
+          addInfoToast(
+            "Context window",
+            `${percentage ? `${percentage} used; ` : ""}${formatContextWindowTokens(
+              context.usedTokens,
+            )}${maxTokens} tokens in context.`,
+          );
+          return true;
+        }
+        case "thread.undo":
+        case "thread.rewind": {
+          if (!activeThread) {
+            addInfoToast("No active thread", `/${command.name} needs an active thread.`, "warning");
+            return true;
+          }
+          const latestCheckpointTurnCount = activeThread.turnDiffSummaries.reduce(
+            (latest, summary) => Math.max(latest, summary.checkpointTurnCount ?? 0),
+            0,
+          );
+          if (latestCheckpointTurnCount <= 0) {
+            addInfoToast(
+              "No checkpoint to revert",
+              "This thread does not have a completed checkpoint to rewind.",
+              "warning",
+            );
+            return true;
+          }
+          void onRevertToTurnCount(latestCheckpointTurnCount - 1);
+          return true;
+        }
+        case "copilot.compact":
+        case "copilot.agent.select":
+        case "copilot.fleet.start": {
+          addInfoToast(
+            `/${command.name} is reserved`,
+            "This Copilot SDK command is now explicit in T3 and will not be sent as prompt text, but its runtime workflow is not wired yet.",
+            "warning",
+          );
+          return true;
+        }
+        default:
+          return false;
+      }
+    },
+    [
+      activeThread,
+      copilotRemoteSteering,
+      copilotRemoteSteeringSupported,
+      handleCopilotRemoteSteeringChange,
+      onRevertToTurnCount,
+      selectedProvider,
+      selectedProviderStatus,
+      threadActivities,
+    ],
+  );
+
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readEnvironmentApi(environmentId);
@@ -3445,6 +3597,7 @@ export default function ChatView(props: ChatViewProps) {
               handleRuntimeModeChange={handleRuntimeModeChange}
               handleCopilotRemoteSteeringChange={handleCopilotRemoteSteeringChange}
               handleInteractionModeChange={handleInteractionModeChange}
+              handleProviderSlashCommandAction={handleProviderSlashCommandAction}
               togglePlanSidebar={togglePlanSidebar}
               focusComposer={focusComposer}
               scheduleComposerFocus={scheduleComposerFocus}
