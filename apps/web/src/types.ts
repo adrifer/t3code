@@ -160,6 +160,8 @@ export interface SidebarThreadSummary {
 export interface ThreadSession {
   provider: ProviderKind;
   status: SessionPhase | "error" | "closed";
+  remoteSteerable?: boolean | undefined;
+  remoteSteeringSupported?: boolean | undefined;
   activeTurnId?: TurnId | undefined;
   createdAt: string;
   updatedAt: string;

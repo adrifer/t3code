@@ -138,6 +138,7 @@ describe("ProviderSessionReaper", () => {
       respondToRequest: () => unsupported(),
       respondToUserInput: () => unsupported(),
       stopSession,
+      setRemoteSteering: () => unsupported(),
       listSessions: () => Effect.succeed([]),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
       rollbackConversation: () => unsupported(),

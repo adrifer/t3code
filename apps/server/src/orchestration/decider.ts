@@ -374,6 +374,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.copilot-remote-steering.set": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.copilot-remote-steering-set",
+        payload: {
+          threadId: command.threadId,
+          enabled: command.enabled,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
     case "thread.turn.start": {
       const targetThread = yield* requireThread({
         readModel,
@@ -584,6 +607,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           session: command.session,
+        },
+      };
+    }
+
+    case "thread.message.append": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.message-sent",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          role: command.role,
+          text: command.text,
+          ...(command.attachments !== undefined ? { attachments: command.attachments } : {}),
+          turnId: command.turnId,
+          streaming: command.streaming,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
         },
       };
     }

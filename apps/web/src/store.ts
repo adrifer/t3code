@@ -147,6 +147,8 @@ function mapSession(session: OrchestrationSession): ThreadSession {
     provider: toLegacyProvider(session.providerName),
     status: toLegacySessionStatus(session.status),
     orchestrationStatus: session.status,
+    remoteSteerable: session.remoteSteerable,
+    remoteSteeringSupported: session.remoteSteeringSupported,
     activeTurnId: session.activeTurnId ?? undefined,
     createdAt: session.updatedAt,
     updatedAt: session.updatedAt,
@@ -370,6 +372,8 @@ function threadSessionsEqual(
     left.provider === right.provider &&
     left.status === right.status &&
     left.orchestrationStatus === right.orchestrationStatus &&
+    left.remoteSteerable === right.remoteSteerable &&
+    left.remoteSteeringSupported === right.remoteSteeringSupported &&
     left.activeTurnId === right.activeTurnId &&
     left.createdAt === right.createdAt &&
     left.updatedAt === right.updatedAt &&

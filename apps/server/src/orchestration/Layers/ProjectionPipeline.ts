@@ -682,6 +682,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         }
 
         case "thread.message-sent":
+        case "thread.copilot-remote-steering-set":
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended":
         case "thread.approval-response-requested":

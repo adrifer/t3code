@@ -95,6 +95,7 @@ function createProviderServiceHarness(
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
+    setRemoteSteering: () => unsupported(),
     listSessions,
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
     rollbackConversation,

@@ -75,6 +75,15 @@ interface CopilotSdkSessionShape {
     readonly mode: {
       readonly set: (params: { readonly mode: CopilotSessionMode }) => Promise<unknown>;
     };
+    readonly remoteSteering?: {
+      readonly set?: (params: { readonly enabled: boolean }) => Promise<unknown>;
+    };
+    readonly remote?: {
+      readonly set?: (params: { readonly enabled: boolean }) => Promise<unknown>;
+    };
+    readonly missionControl?: {
+      readonly setRemoteSteering?: (params: { readonly enabled: boolean }) => Promise<unknown>;
+    };
   };
   on(handler: (event: SessionEvent) => void): () => void;
   send(options: MessageOptions): Promise<string>;
@@ -542,6 +551,34 @@ function makeResumeCursor(sessionId: string, turnCount: number): unknown {
   return { sessionId, turnCount };
 }
 
+function remoteSteerableFromHistory(events: ReadonlyArray<SessionEvent>): boolean | undefined {
+  let remoteSteerable: boolean | undefined;
+  for (const event of events) {
+    switch (event.type) {
+      case "session.start":
+      case "session.resume":
+      case "session.remote_steerable_changed": {
+        const data = asRecord(event.data);
+        if (typeof data?.remoteSteerable === "boolean") {
+          remoteSteerable = data.remoteSteerable;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return remoteSteerable;
+}
+
+function hasRemoteSteeringSetter(sdkSession: CopilotSdkSessionShape): boolean {
+  return Boolean(
+    sdkSession.rpc.remoteSteering?.set ??
+    sdkSession.rpc.remote?.set ??
+    sdkSession.rpc.missionControl?.setRemoteSteering,
+  );
+}
+
 function mapPermissionRequestType(
   request: CopilotPermissionEventRequest,
 ): Extract<ProviderRuntimeEvent, { type: "request.opened" }>["payload"]["requestType"] {
@@ -902,6 +939,30 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       },
     });
 
+  const emitRemoteSteeringState = (
+    context: CopilotSessionContext,
+    input: {
+      readonly enabled: boolean;
+      readonly supported: boolean;
+      readonly reason?: string;
+      readonly createdAt?: string;
+      readonly raw?: SessionEvent;
+    },
+  ) =>
+    offerRuntimeEvent({
+      ...buildEventBase({
+        threadId: context.session.threadId,
+        createdAt: input.createdAt,
+        raw: input.raw,
+      }),
+      type: "session.remote-steering.changed",
+      payload: {
+        enabled: input.enabled,
+        supported: input.supported,
+        ...(input.reason ? { reason: input.reason } : {}),
+      },
+    });
+
   const ensureContext = (
     threadId: ThreadId,
   ): Effect.Effect<CopilotSessionContext, ProviderAdapterSessionNotFoundError> =>
@@ -1023,6 +1084,68 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     activeTurn.reasoningBlocks.set(reasoningId, next);
     return next;
   };
+
+  const startRemoteTurn = (
+    context: CopilotSessionContext,
+    event: Extract<SessionEvent, { type: "user.message" }>,
+  ): Effect.Effect<ActiveTurnState> =>
+    Effect.gen(function* () {
+      const turnId = nextTurnId();
+      const itemId = nextItemId();
+      const remoteTurn: ActiveTurnState = {
+        turnId,
+        itemId,
+        input: event.data.content,
+        interactionMode: "default",
+        attachments: [],
+        toolCalls: new Map(),
+        completedToolItems: [],
+        assistantMessages: new Map(),
+        reasoningBlocks: new Map(),
+        assistantSegmentIndex: 0,
+        pendingAssistantSegmentSplit: false,
+        providerTurnId: undefined,
+        lastPersistedEventId: event.ephemeral ? undefined : event.id,
+        lastUsage: undefined,
+        failureMessage: undefined,
+        aborted: false,
+      };
+      context.activeTurn = remoteTurn;
+      context.session = {
+        ...context.session,
+        status: "running",
+        activeTurnId: turnId,
+        updatedAt: nowIso(),
+      };
+      yield* emitSessionState(context, "running");
+      yield* offerRuntimeEvent({
+        ...buildEventBase({
+          threadId: context.session.threadId,
+          turnId,
+          itemId,
+          createdAt: event.timestamp,
+          raw: event,
+        }),
+        type: "turn.started",
+        payload: {},
+      });
+      yield* offerRuntimeEvent({
+        ...buildEventBase({
+          threadId: context.session.threadId,
+          turnId,
+          itemId: RuntimeItemId.make(`copilot-user:${event.id}`),
+          createdAt: event.timestamp,
+          raw: event,
+        }),
+        type: "item.completed",
+        payload: {
+          itemType: "user_message",
+          title: "Remote user message",
+          detail: event.data.content,
+        },
+      });
+      return remoteTurn;
+    });
 
   const finalizeTurn = (
     context: CopilotSessionContext,
@@ -1165,9 +1288,56 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         context.sessionBoundaryEventId = event.id;
       }
 
-      const activeTurn = context.activeTurn;
+      let activeTurn = context.activeTurn;
 
       switch (event.type) {
+        case "session.start":
+        case "session.resume": {
+          const data = asRecord(event.data);
+          if (typeof data?.remoteSteerable === "boolean") {
+            const remoteSteeringSupported = hasRemoteSteeringSetter(context.sdkSession);
+            context.session = {
+              ...context.session,
+              remoteSteerable: data.remoteSteerable,
+              remoteSteeringSupported,
+              updatedAt: nowIso(),
+            };
+            yield* emitRemoteSteeringState(context, {
+              enabled: data.remoteSteerable,
+              supported: remoteSteeringSupported,
+              ...(!remoteSteeringSupported
+                ? { reason: "Copilot SDK does not expose a typed remote steering setter." }
+                : {}),
+              createdAt: event.timestamp,
+              raw: event,
+            });
+          }
+          return;
+        }
+        case "session.remote_steerable_changed": {
+          context.session = {
+            ...context.session,
+            remoteSteerable: event.data.remoteSteerable,
+            remoteSteeringSupported: hasRemoteSteeringSetter(context.sdkSession),
+            updatedAt: nowIso(),
+          };
+          yield* emitRemoteSteeringState(context, {
+            enabled: event.data.remoteSteerable,
+            supported: hasRemoteSteeringSetter(context.sdkSession),
+            ...(!hasRemoteSteeringSetter(context.sdkSession)
+              ? { reason: "Copilot SDK does not expose a typed remote steering setter." }
+              : {}),
+            createdAt: event.timestamp,
+            raw: event,
+          });
+          return;
+        }
+        case "user.message": {
+          if (!activeTurn) {
+            activeTurn = yield* startRemoteTurn(context, event);
+          }
+          return;
+        }
         case "assistant.turn_start": {
           if (!activeTurn) {
             return;
@@ -1934,11 +2104,19 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
           }),
       }).pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<SessionEvent>)));
       const rebuilt = rebuildTurnsFromHistory(history);
+      const remoteSteerable = remoteSteerableFromHistory(history);
+      const remoteSteeringSupported = hasRemoteSteeringSetter(sdkSession);
       const createdAt = nowIso();
       const session: ProviderSession = {
         provider: PROVIDER,
         status: "ready",
         runtimeMode: input.runtimeMode,
+        ...(remoteSteerable !== undefined
+          ? {
+              remoteSteerable,
+              remoteSteeringSupported,
+            }
+          : { remoteSteeringSupported }),
         ...(input.cwd ? { cwd: input.cwd } : {}),
         model: modelSelection.model,
         threadId: input.threadId,
@@ -1990,6 +2168,16 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         },
       });
       yield* emitSessionState(context, "ready");
+      if (remoteSteerable !== undefined) {
+        yield* emitRemoteSteeringState(context, {
+          enabled: remoteSteerable,
+          supported: remoteSteeringSupported,
+          ...(!remoteSteeringSupported
+            ? { reason: "Copilot SDK does not expose a typed remote steering setter." }
+            : {}),
+          createdAt,
+        });
+      }
 
       return session;
     });
@@ -2233,6 +2421,57 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       }
     });
 
+  const setRemoteSteering: NonNullable<CopilotAdapterShape["setRemoteSteering"]> = (input) =>
+    Effect.gen(function* () {
+      const context = yield* ensureOpenContext(input.threadId);
+      const setter =
+        context.sdkSession.rpc.remoteSteering?.set ??
+        context.sdkSession.rpc.remote?.set ??
+        context.sdkSession.rpc.missionControl?.setRemoteSteering;
+
+      if (!setter) {
+        context.session = {
+          ...context.session,
+          remoteSteeringSupported: false,
+          updatedAt: nowIso(),
+        };
+        yield* emitRemoteSteeringState(context, {
+          enabled: context.session.remoteSteerable ?? false,
+          supported: false,
+          reason: "Current @github/copilot-sdk does not expose remote steering toggling.",
+        });
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "session/remote-steering/set",
+          detail:
+            "Current @github/copilot-sdk does not expose a remote steering setter. Upgrade the SDK/CLI when GitHub publishes this RPC.",
+        });
+      }
+
+      yield* Effect.tryPromise({
+        try: () => setter({ enabled: input.enabled }),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "session/remote-steering/set",
+            detail: toMessage(cause, "Failed to update Copilot remote steering."),
+            cause,
+          }),
+      });
+
+      context.session = {
+        ...context.session,
+        remoteSteerable: input.enabled,
+        remoteSteeringSupported: true,
+        updatedAt: nowIso(),
+      };
+      yield* emitRemoteSteeringState(context, {
+        enabled: input.enabled,
+        supported: true,
+      });
+      return context.session;
+    });
+
   const stopSession: CopilotAdapterShape["stopSession"] = (threadId) =>
     Effect.gen(function* () {
       const context = yield* ensureContext(threadId);
@@ -2374,6 +2613,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    setRemoteSteering,
     listSessions,
     hasSession,
     readThread: snapshotThread,

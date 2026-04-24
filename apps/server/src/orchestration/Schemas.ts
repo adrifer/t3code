@@ -7,6 +7,7 @@ import {
   ThreadMetaUpdatedPayload as ContractsThreadMetaUpdatedPayloadSchema,
   ThreadRuntimeModeSetPayload as ContractsThreadRuntimeModeSetPayloadSchema,
   ThreadInteractionModeSetPayload as ContractsThreadInteractionModeSetPayloadSchema,
+  ThreadCopilotRemoteSteeringSetPayload as ContractsThreadCopilotRemoteSteeringSetPayloadSchema,
   ThreadDeletedPayload as ContractsThreadDeletedPayloadSchema,
   ThreadUnarchivedPayload as ContractsThreadUnarchivedPayloadSchema,
   ThreadMessageSentPayload as ContractsThreadMessageSentPayloadSchema,
@@ -32,6 +33,8 @@ export const ThreadArchivedPayload = ContractsThreadArchivedPayloadSchema;
 export const ThreadMetaUpdatedPayload = ContractsThreadMetaUpdatedPayloadSchema;
 export const ThreadRuntimeModeSetPayload = ContractsThreadRuntimeModeSetPayloadSchema;
 export const ThreadInteractionModeSetPayload = ContractsThreadInteractionModeSetPayloadSchema;
+export const ThreadCopilotRemoteSteeringSetPayload =
+  ContractsThreadCopilotRemoteSteeringSetPayloadSchema;
 export const ThreadDeletedPayload = ContractsThreadDeletedPayloadSchema;
 export const ThreadUnarchivedPayload = ContractsThreadUnarchivedPayloadSchema;
 

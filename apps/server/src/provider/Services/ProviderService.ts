@@ -18,6 +18,7 @@ import type {
   ProviderRespondToUserInputInput,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
+  ProviderSetRemoteSteeringInput,
   ProviderSession,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
@@ -76,6 +77,13 @@ export interface ProviderServiceShape {
   readonly stopSession: (
     input: ProviderStopSessionInput,
   ) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
+   * Enable or disable provider remote steering when supported.
+   */
+  readonly setRemoteSteering: (
+    input: ProviderSetRemoteSteeringInput,
+  ) => Effect.Effect<ProviderSession, ProviderServiceError>;
 
   /**
    * List active provider sessions.

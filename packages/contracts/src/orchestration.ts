@@ -246,6 +246,8 @@ export const OrchestrationSession = Schema.Struct({
   status: OrchestrationSessionStatus,
   providerName: Schema.NullOr(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
+  remoteSteerable: Schema.optional(Schema.Boolean),
+  remoteSteeringSupported: Schema.optional(Schema.Boolean),
   activeTurnId: Schema.NullOr(TurnId),
   lastError: Schema.NullOr(TrimmedNonEmptyString),
   updatedAt: IsoDateTime,
@@ -522,6 +524,14 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadCopilotRemoteSteeringSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.copilot-remote-steering.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  enabled: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -639,6 +649,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadCopilotRemoteSteeringSetCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -660,6 +671,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadCopilotRemoteSteeringSetCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -693,6 +705,19 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
   turnId: Schema.optional(TurnId),
+  createdAt: IsoDateTime,
+});
+
+const ThreadMessageAppendCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.append"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  role: OrchestrationMessageRole,
+  text: Schema.String,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  turnId: Schema.NullOr(TurnId),
+  streaming: Schema.Boolean,
   createdAt: IsoDateTime,
 });
 
@@ -736,6 +761,7 @@ const ThreadRevertCompleteCommand = Schema.Struct({
 
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
+  ThreadMessageAppendCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
   ThreadProposedPlanUpsertCommand,
@@ -762,6 +788,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.meta-updated",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
+  "thread.copilot-remote-steering-set",
   "thread.message-sent",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
@@ -858,6 +885,12 @@ export const ThreadInteractionModeSetPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadCopilotRemoteSteeringSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  enabled: Schema.Boolean,
   updatedAt: IsoDateTime,
 });
 
@@ -1019,6 +1052,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.interaction-mode-set"),
     payload: ThreadInteractionModeSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.copilot-remote-steering-set"),
+    payload: ThreadCopilotRemoteSteeringSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

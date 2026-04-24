@@ -85,6 +85,7 @@ import { Button } from "../ui/button";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import {
   BotIcon,
@@ -167,11 +168,14 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
+  copilotRemoteSteering: boolean;
+  copilotRemoteSteeringSupported: boolean;
   showPlanToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
   onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
+  onCopilotRemoteSteeringChange: (enabled: boolean) => void;
   onTogglePlanSidebar: () => void;
 }) {
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
@@ -256,6 +260,40 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
           })}
         </SelectPopup>
       </Select>
+
+      {props.provider === "copilot" ? (
+        <>
+          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <label
+                  className={cn(
+                    "flex shrink-0 items-center gap-2 rounded-md px-2 py-1 text-muted-foreground/80 text-xs",
+                    props.copilotRemoteSteeringSupported
+                      ? "cursor-pointer hover:text-foreground/80"
+                      : "cursor-not-allowed opacity-70",
+                  )}
+                />
+              }
+            >
+              <Switch
+                checked={props.copilotRemoteSteering}
+                disabled={!props.copilotRemoteSteeringSupported}
+                onCheckedChange={(checked) => {
+                  props.onCopilotRemoteSteeringChange(Boolean(checked));
+                }}
+              />
+              <span>Remote</span>
+            </TooltipTrigger>
+            <TooltipPopup>
+              {props.copilotRemoteSteeringSupported
+                ? "Continue this Copilot session from GitHub.com."
+                : "Remote steering toggling is not exposed by the current Copilot SDK/CLI."}
+            </TooltipPopup>
+          </Tooltip>
+        </>
+      ) : null}
 
       {props.showPlanToggle ? (
         <>
@@ -421,6 +459,8 @@ export interface ChatComposerProps {
   // Mode
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  copilotRemoteSteering: boolean;
+  copilotRemoteSteeringSupported: boolean;
 
   // Provider / model
   lockedProvider: ProviderKind | null;
@@ -469,6 +509,7 @@ export interface ChatComposerProps {
   onProviderModelSelect: (provider: ProviderKind, model: string) => void;
   toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
+  handleCopilotRemoteSteeringChange: (enabled: boolean) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
   togglePlanSidebar: () => void;
 
@@ -516,6 +557,8 @@ export const ChatComposer = memo(
       planSidebarOpen,
       runtimeMode,
       interactionMode,
+      copilotRemoteSteering,
+      copilotRemoteSteeringSupported,
       lockedProvider,
       providerStatuses,
       activeProjectDefaultModelSelection,
@@ -542,6 +585,7 @@ export const ChatComposer = memo(
       onProviderModelSelect,
       toggleInteractionMode,
       handleRuntimeModeChange,
+      handleCopilotRemoteSteeringChange,
       handleInteractionModeChange,
       togglePlanSidebar,
       focusComposer,
@@ -1954,11 +1998,14 @@ export const ChatComposer = memo(
                         }
                         interactionMode={interactionMode}
                         runtimeMode={runtimeMode}
+                        copilotRemoteSteering={copilotRemoteSteering}
+                        copilotRemoteSteeringSupported={copilotRemoteSteeringSupported}
                         showPlanToggle={showPlanSidebarToggle}
                         planSidebarLabel={planSidebarLabel}
                         planSidebarOpen={planSidebarOpen}
                         onInteractionModeChange={handleInteractionModeChange}
                         onRuntimeModeChange={handleRuntimeModeChange}
+                        onCopilotRemoteSteeringChange={handleCopilotRemoteSteeringChange}
                         onTogglePlanSidebar={togglePlanSidebar}
                       />
                     </>

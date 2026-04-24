@@ -149,6 +149,7 @@ const ProviderRuntimeEventType = Schema.Literals([
   "session.started",
   "session.configured",
   "session.state.changed",
+  "session.remote-steering.changed",
   "session.exited",
   "thread.started",
   "thread.state.changed",
@@ -199,6 +200,7 @@ export type ProviderRuntimeEventType = typeof ProviderRuntimeEventType.Type;
 const SessionStartedType = Schema.Literal("session.started");
 const SessionConfiguredType = Schema.Literal("session.configured");
 const SessionStateChangedType = Schema.Literal("session.state.changed");
+const SessionRemoteSteeringChangedType = Schema.Literal("session.remote-steering.changed");
 const SessionExitedType = Schema.Literal("session.exited");
 const ThreadStartedType = Schema.Literal("thread.started");
 const ThreadStateChangedType = Schema.Literal("thread.state.changed");
@@ -274,6 +276,13 @@ const SessionStateChangedPayload = Schema.Struct({
   detail: Schema.optional(Schema.Unknown),
 });
 export type SessionStateChangedPayload = typeof SessionStateChangedPayload.Type;
+
+const SessionRemoteSteeringChangedPayload = Schema.Struct({
+  enabled: Schema.Boolean,
+  supported: Schema.Boolean,
+  reason: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type SessionRemoteSteeringChangedPayload = typeof SessionRemoteSteeringChangedPayload.Type;
 
 const SessionExitedPayload = Schema.Struct({
   reason: Schema.optional(TrimmedNonEmptyStringSchema),
@@ -621,6 +630,14 @@ const ProviderRuntimeSessionStateChangedEvent = Schema.Struct({
 export type ProviderRuntimeSessionStateChangedEvent =
   typeof ProviderRuntimeSessionStateChangedEvent.Type;
 
+const ProviderRuntimeSessionRemoteSteeringChangedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: SessionRemoteSteeringChangedType,
+  payload: SessionRemoteSteeringChangedPayload,
+});
+export type ProviderRuntimeSessionRemoteSteeringChangedEvent =
+  typeof ProviderRuntimeSessionRemoteSteeringChangedEvent.Type;
+
 const ProviderRuntimeSessionExitedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: SessionExitedType,
@@ -948,6 +965,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeSessionStartedEvent,
   ProviderRuntimeSessionConfiguredEvent,
   ProviderRuntimeSessionStateChangedEvent,
+  ProviderRuntimeSessionRemoteSteeringChangedEvent,
   ProviderRuntimeSessionExitedEvent,
   ProviderRuntimeThreadStartedEvent,
   ProviderRuntimeThreadStateChangedEvent,

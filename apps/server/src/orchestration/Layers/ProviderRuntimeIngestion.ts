@@ -1143,6 +1143,7 @@ const make = Effect.gen(function* () {
         event.type === "session.started" ||
         event.type === "session.state.changed" ||
         event.type === "session.exited" ||
+        event.type === "session.remote-steering.changed" ||
         event.type === "thread.started" ||
         event.type === "turn.started" ||
         event.type === "turn.completed"
@@ -1161,6 +1162,8 @@ const make = Effect.gen(function* () {
               return "running";
             case "session.exited":
               return "stopped";
+            case "session.remote-steering.changed":
+              return thread.session?.status ?? "ready";
             case "turn.completed":
               return normalizeRuntimeTurnState(event.payload.state) === "failed"
                 ? "error"
@@ -1212,6 +1215,19 @@ const make = Effect.gen(function* () {
               status,
               providerName: event.provider,
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
+              ...(event.type === "session.remote-steering.changed"
+                ? {
+                    remoteSteerable: event.payload.enabled,
+                    remoteSteeringSupported: event.payload.supported,
+                  }
+                : {
+                    ...(thread.session?.remoteSteerable !== undefined
+                      ? { remoteSteerable: thread.session.remoteSteerable }
+                      : {}),
+                    ...(thread.session?.remoteSteeringSupported !== undefined
+                      ? { remoteSteeringSupported: thread.session.remoteSteeringSupported }
+                      : {}),
+                  }),
               activeTurnId: nextActiveTurnId,
               lastError,
               updatedAt: now,
@@ -1267,6 +1283,25 @@ const make = Effect.gen(function* () {
             createdAt: now,
           });
         }
+      }
+
+      if (
+        event.type === "item.completed" &&
+        event.payload.itemType === "user_message" &&
+        event.payload.detail !== undefined
+      ) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.message.append",
+          commandId: providerCommandId(event, "remote-user-message"),
+          threadId: thread.id,
+          messageId: MessageId.make(`user:${event.eventId}`),
+          role: "user",
+          text: event.payload.detail,
+          attachments: [],
+          turnId: eventTurnId ?? null,
+          streaming: false,
+          createdAt: now,
+        });
       }
 
       const pauseForUserTurnId =

@@ -17,6 +17,7 @@ import {
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderSendTurnInput,
+  ProviderSetRemoteSteeringInput,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
   type ProviderRuntimeEvent,
@@ -110,6 +111,8 @@ function toRuntimePayloadFromSession(
     cwd: session.cwd ?? null,
     model: session.model ?? null,
     activeTurnId: session.activeTurnId ?? null,
+    remoteSteerable: session.remoteSteerable ?? null,
+    remoteSteeringSupported: session.remoteSteeringSupported ?? null,
     lastError: session.lastError ?? null,
     ...(extra?.modelSelection !== undefined ? { modelSelection: extra.modelSelection } : {}),
     ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
@@ -645,6 +648,55 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const setRemoteSteering: ProviderServiceShape["setRemoteSteering"] = Effect.fn(
+    "setRemoteSteering",
+  )(function* (rawInput) {
+    const input = yield* decodeInputOrValidationError({
+      operation: "ProviderService.setRemoteSteering",
+      schema: ProviderSetRemoteSteeringInput,
+      payload: rawInput,
+    });
+    let metricProvider = "unknown";
+    return yield* Effect.gen(function* () {
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.setRemoteSteering",
+        allowRecovery: true,
+      });
+      metricProvider = routed.adapter.provider;
+      yield* Effect.annotateCurrentSpan({
+        "provider.operation": "set-remote-steering",
+        "provider.kind": routed.adapter.provider,
+        "provider.thread_id": input.threadId,
+        "provider.remote_steering": input.enabled,
+      });
+      if (!routed.adapter.setRemoteSteering) {
+        return yield* toValidationError(
+          "ProviderService.setRemoteSteering",
+          `Provider '${routed.adapter.provider}' does not support remote steering.`,
+        );
+      }
+      const session = yield* routed.adapter.setRemoteSteering(input);
+      yield* upsertSessionBinding(session, input.threadId, {
+        lastRuntimeEvent: "provider.remoteSteering.set",
+        lastRuntimeEventAt: new Date().toISOString(),
+      });
+      yield* analytics.record("provider.remote_steering.set", {
+        provider: routed.adapter.provider,
+        enabled: input.enabled,
+      });
+      return session;
+    }).pipe(
+      withMetrics({
+        counter: providerSessionsTotal,
+        outcomeAttributes: () =>
+          providerMetricAttributes(metricProvider, {
+            operation: "remote-steering",
+          }),
+      }),
+    );
+  });
+
   const listSessions: ProviderServiceShape["listSessions"] = Effect.fn("listSessions")(
     function* () {
       const sessionsByProvider = yield* Effect.forEach(adapters, (adapter) =>
@@ -681,12 +733,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const overrides: {
           resumeCursor?: ProviderSession["resumeCursor"];
           runtimeMode?: ProviderSession["runtimeMode"];
+          remoteSteerable?: ProviderSession["remoteSteerable"];
+          remoteSteeringSupported?: ProviderSession["remoteSteeringSupported"];
         } = {};
         if (session.resumeCursor === undefined && binding.resumeCursor !== undefined) {
           overrides.resumeCursor = binding.resumeCursor;
         }
         if (binding.runtimeMode !== undefined) {
           overrides.runtimeMode = binding.runtimeMode;
+        }
+        if (binding.runtimePayload && typeof binding.runtimePayload === "object") {
+          const payload = binding.runtimePayload as Record<string, unknown>;
+          if (typeof payload.remoteSteerable === "boolean") {
+            overrides.remoteSteerable = payload.remoteSteerable;
+          }
+          if (typeof payload.remoteSteeringSupported === "boolean") {
+            overrides.remoteSteeringSupported = payload.remoteSteeringSupported;
+          }
         }
         return Object.assign({}, session, overrides);
       });
@@ -784,6 +847,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    setRemoteSteering,
     listSessions,
     getCapabilities,
     rollbackConversation,

@@ -35,6 +35,8 @@ export const ProviderSession = Schema.Struct({
   provider: ProviderKind,
   status: ProviderSessionStatus,
   runtimeMode: RuntimeMode,
+  remoteSteerable: Schema.optional(Schema.Boolean),
+  remoteSteeringSupported: Schema.optional(Schema.Boolean),
   cwd: Schema.optional(TrimmedNonEmptyString),
   model: Schema.optional(TrimmedNonEmptyString),
   threadId: ThreadId,
@@ -88,6 +90,12 @@ export const ProviderStopSessionInput = Schema.Struct({
   threadId: ThreadId,
 });
 export type ProviderStopSessionInput = typeof ProviderStopSessionInput.Type;
+
+export const ProviderSetRemoteSteeringInput = Schema.Struct({
+  threadId: ThreadId,
+  enabled: Schema.Boolean,
+});
+export type ProviderSetRemoteSteeringInput = typeof ProviderSetRemoteSteeringInput.Type;
 
 export const ProviderRespondToRequestInput = Schema.Struct({
   threadId: ThreadId,

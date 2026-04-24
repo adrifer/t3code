@@ -17,6 +17,7 @@ import {
   ThreadArchivedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
+  ThreadCopilotRemoteSteeringSetPayload,
   ThreadInteractionModeSetPayload,
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
@@ -355,6 +356,34 @@ export function projectEvent(
             updatedAt: payload.updatedAt,
           }),
         })),
+      );
+
+    case "thread.copilot-remote-steering-set":
+      return decodeForEvent(
+        ThreadCopilotRemoteSteeringSetPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              session: thread.session
+                ? {
+                    ...thread.session,
+                    remoteSteerable: payload.enabled,
+                    updatedAt: payload.updatedAt,
+                  }
+                : thread.session,
+              updatedAt: payload.updatedAt,
+            }),
+          };
+        }),
       );
 
     case "thread.message-sent":

@@ -14,6 +14,7 @@ import type {
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
+  ProviderSetRemoteSteeringInput,
   ProviderSession,
   ProviderSessionStartInput,
   ThreadId,
@@ -90,6 +91,17 @@ export interface ProviderAdapterShape<TError> {
    * Stop one provider session.
    */
   readonly stopSession: (threadId: ThreadId) => Effect.Effect<void, TError>;
+
+  /**
+   * Enable or disable Copilot remote steering for a session.
+   *
+   * Adapters that do not support GitHub Copilot Mission Control remote
+   * steering should leave this undefined so ProviderService can surface a
+   * consistent unsupported error.
+   */
+  readonly setRemoteSteering?: (
+    input: ProviderSetRemoteSteeringInput,
+  ) => Effect.Effect<ProviderSession, TError>;
 
   /**
    * List currently active provider sessions for this adapter.

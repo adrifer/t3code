@@ -628,6 +628,9 @@ export default function ChatView(props: ChatViewProps) {
   const composerInteractionMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.interactionMode ?? null,
   );
+  const composerCopilotRemoteSteering = useComposerDraftStore(
+    (store) => store.getComposerDraft(composerDraftTarget)?.copilotRemoteSteering ?? null,
+  );
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
   );
@@ -640,6 +643,9 @@ export default function ChatView(props: ChatViewProps) {
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
+  );
+  const setComposerDraftCopilotRemoteSteering = useComposerDraftStore(
+    (store) => store.setCopilotRemoteSteering,
   );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
@@ -1053,6 +1059,9 @@ export default function ChatView(props: ChatViewProps) {
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
+  const copilotRemoteSteering =
+    composerCopilotRemoteSteering ?? activeThread?.session?.remoteSteerable ?? false;
+  const copilotRemoteSteeringSupported = activeThread?.session?.remoteSteeringSupported ?? false;
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
@@ -1886,6 +1895,49 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const handleCopilotRemoteSteeringChange = useCallback(
+    (enabled: boolean) => {
+      if (enabled === copilotRemoteSteering) return;
+      setComposerDraftCopilotRemoteSteering(composerDraftTarget, enabled);
+      scheduleComposerFocus();
+
+      if (!isServerThread || selectedProvider !== "copilot" || !activeThreadId) {
+        return;
+      }
+      const api = readEnvironmentApi(environmentId);
+      if (!api) {
+        return;
+      }
+      api.orchestration
+        .dispatchCommand({
+          type: "thread.copilot-remote-steering.set",
+          commandId: newCommandId(),
+          threadId: activeThreadId,
+          enabled,
+          createdAt: new Date().toISOString(),
+        })
+        .catch((error: unknown) => {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not update Copilot remote",
+              description: error instanceof Error ? error.message : "An unexpected error occurred.",
+            }),
+          );
+        });
+    },
+    [
+      activeThreadId,
+      composerDraftTarget,
+      copilotRemoteSteering,
+      environmentId,
+      isServerThread,
+      scheduleComposerFocus,
+      selectedProvider,
+      setComposerDraftCopilotRemoteSteering,
+    ],
+  );
+
   const handleInteractionModeChange = useCallback(
     (mode: ProviderInteractionMode) => {
       if (mode === interactionMode) return;
@@ -2624,6 +2676,15 @@ export default function ChatView(props: ChatViewProps) {
         ...(bootstrap ? { bootstrap } : {}),
         createdAt: messageCreatedAt,
       });
+      if (ctxSelectedProvider === "copilot" && composerCopilotRemoteSteering !== null) {
+        await api.orchestration.dispatchCommand({
+          type: "thread.copilot-remote-steering.set",
+          commandId: newCommandId(),
+          threadId: threadIdForSend,
+          enabled: composerCopilotRemoteSteering,
+          createdAt: new Date().toISOString(),
+        });
+      }
       turnStartSucceeded = true;
     })().catch(async (err: unknown) => {
       if (
@@ -3352,6 +3413,8 @@ export default function ChatView(props: ChatViewProps) {
               planSidebarOpen={planSidebarOpen}
               runtimeMode={runtimeMode}
               interactionMode={interactionMode}
+              copilotRemoteSteering={copilotRemoteSteering}
+              copilotRemoteSteeringSupported={copilotRemoteSteeringSupported}
               lockedProvider={lockedProvider}
               providerStatuses={providerStatuses as ServerProvider[]}
               activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
@@ -3380,6 +3443,7 @@ export default function ChatView(props: ChatViewProps) {
               onProviderModelSelect={onProviderModelSelect}
               toggleInteractionMode={toggleInteractionMode}
               handleRuntimeModeChange={handleRuntimeModeChange}
+              handleCopilotRemoteSteeringChange={handleCopilotRemoteSteeringChange}
               handleInteractionModeChange={handleInteractionModeChange}
               togglePlanSidebar={togglePlanSidebar}
               focusComposer={focusComposer}

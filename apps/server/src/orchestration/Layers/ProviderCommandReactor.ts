@@ -36,6 +36,7 @@ type ProviderIntentEvent = Extract<
   {
     type:
       | "thread.runtime-mode-set"
+      | "thread.copilot-remote-steering-set"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
@@ -177,6 +178,7 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly kind:
       | "provider.turn.start.failed"
+      | "provider.remote-steering.set.failed"
       | "provider.turn.interrupt.failed"
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
@@ -804,6 +806,36 @@ const make = Effect.gen(function* () {
     });
   });
 
+  const processCopilotRemoteSteeringSet = Effect.fn("processCopilotRemoteSteeringSet")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.copilot-remote-steering-set" }>,
+  ) {
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (!thread?.session || thread.session.status === "stopped") {
+      return;
+    }
+    if (thread.session.providerName !== "copilot") {
+      return;
+    }
+
+    yield* providerService
+      .setRemoteSteering({
+        threadId: event.payload.threadId,
+        enabled: event.payload.enabled,
+      })
+      .pipe(
+        Effect.catchCause((cause) =>
+          appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.remote-steering.set.failed",
+            summary: "Copilot remote steering update failed",
+            detail: formatFailureDetail(cause),
+            turnId: null,
+            createdAt: event.payload.updatedAt,
+          }),
+        ),
+      );
+  });
+
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
     event: ProviderIntentEvent,
   ) {
@@ -829,6 +861,9 @@ const make = Effect.gen(function* () {
         );
         return;
       }
+      case "thread.copilot-remote-steering-set":
+        yield* processCopilotRemoteSteeringSet(event);
+        return;
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
@@ -866,6 +901,7 @@ const make = Effect.gen(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
         event.type === "thread.runtime-mode-set" ||
+        event.type === "thread.copilot-remote-steering-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
