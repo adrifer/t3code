@@ -100,8 +100,6 @@ export const layer = Layer.effect(
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
 
-    const nodePty = yield* Effect.promise(() => import("node-pty"));
-
     const ensureNodePtySpawnHelperExecutableCached = yield* Effect.cached(
       ensureNodePtySpawnHelperExecutable().pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
@@ -109,10 +107,23 @@ export const layer = Layer.effect(
         Effect.orElseSucceed(() => undefined),
       ),
     );
+    const loadNodePty = yield* Effect.cached(
+      Effect.tryPromise({
+        try: () => import("node-pty"),
+        catch: (cause) =>
+          new PtySpawnError({
+            adapter: "node-pty",
+            message:
+              "node-pty is unavailable. Run bun install and rebuild native dependencies before using terminal features.",
+            cause,
+          }),
+      }),
+    );
 
     return {
       spawn: Effect.fn(function* (input) {
         yield* ensureNodePtySpawnHelperExecutableCached;
+        const nodePty = yield* loadNodePty;
         const ptyProcess = yield* Effect.try({
           try: () =>
             nodePty.spawn(input.shell, input.args ?? [], {
