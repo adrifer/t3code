@@ -1087,6 +1087,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
             // instanceRegistry.streamChanges, () => syncLiveSources)`
             // fires `syncLiveSources`, which subscribes + awaits a fresh
             // refresh on the rebuilt instance.
+            yield* TestClock.adjust("1 second");
             yield* serverSettings.updateSettings({
               providers: {
                 codex: { enabled: true, binaryPath: secondMissing },
@@ -1247,6 +1248,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               assert.deepStrictEqual(providers.map((provider) => provider.instanceId).toSorted(), [
                 "claudeAgent",
                 "codex",
+                "copilot",
                 "cursor",
                 "opencode",
               ]);

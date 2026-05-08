@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { type CopilotSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import { CopilotSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
