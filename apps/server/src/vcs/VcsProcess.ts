@@ -16,6 +16,7 @@ import {
   VcsProcessTimeoutError,
 } from "@t3tools/contracts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
+import { resolveCommandExecution, translateEnvForExecution } from "../wsl.ts";
 
 export interface VcsProcessInput {
   readonly operation: string;
@@ -107,13 +108,21 @@ export const make = Effect.fn("makeVcsProcess")(function* () {
 
   const spawn = Effect.fn("VcsProcess.spawn")(function* (input: VcsProcessInput) {
     const label = commandLabel(input.command, input.args);
+    const resolvedCommand = resolveCommandExecution({
+      command: input.command,
+      args: input.args,
+      cwd: input.cwd,
+      env: input.env,
+      shellOnWindows: false,
+    });
+    const resolvedEnv = translateEnvForExecution(input.env, resolvedCommand.wsl);
     const child = yield* spawner
       .spawn(
-        ChildProcess.make(input.command, [...input.args], {
-          cwd: input.cwd,
+        ChildProcess.make(resolvedCommand.command, [...resolvedCommand.args], {
+          cwd: resolvedCommand.cwd,
           env: {
             ...process.env,
-            ...input.env,
+            ...resolvedEnv,
           },
         }),
       )

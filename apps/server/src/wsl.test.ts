@@ -6,6 +6,7 @@ import {
   resolveWslExecutionTarget,
   resolveWslTerminalShell,
   toWslPath,
+  translateEnvForExecution,
   translatePathForExecution,
 } from "./wsl.ts";
 
@@ -76,6 +77,28 @@ describe("wsl helpers", () => {
         resolveWslExecutionTarget({ enabled: true, distro: "Ubuntu" }),
       ),
     ).toBe("/mnt/c/Users/dev/.t3/attachments/image.png");
+  });
+
+  it("translates Git path environment variables for WSL execution", () => {
+    setPlatform("win32");
+    const target = resolveWslExecutionTarget({
+      cwd: String.raw`\\wsl.localhost\NixOS\home\dev\repo`,
+    });
+
+    expect(
+      translateEnvForExecution(
+        {
+          GIT_INDEX_FILE: String.raw`C:\Users\dev\AppData\Local\Temp\t3-index`,
+          GIT_TRACE2_EVENT: String.raw`\\wsl.localhost\NixOS\tmp\t3-trace.json`,
+          CUSTOM_VALUE: String.raw`C:\Users\dev\untouched`,
+        },
+        target,
+      ),
+    ).toEqual({
+      GIT_INDEX_FILE: "/mnt/c/Users/dev/AppData/Local/Temp/t3-index",
+      GIT_TRACE2_EVENT: "/tmp/t3-trace.json",
+      CUSTOM_VALUE: String.raw`C:\Users\dev\untouched`,
+    });
   });
 
   it("boots interactive terminal shells through /bin/sh instead of assuming zsh exists", () => {

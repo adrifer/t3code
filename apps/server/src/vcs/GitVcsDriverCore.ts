@@ -21,6 +21,7 @@ import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
+import { resolveCommandExecution, translateEnvForExecution } from "../wsl.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import {
   parseRemoteNames,
@@ -623,14 +624,25 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.mapError(toGitCommandError(commandInput, "failed to create trace2 monitor.")),
         );
+        const commandEnv = {
+          ...input.env,
+          ...trace2Monitor.env,
+        };
+        const resolvedCommand = resolveCommandExecution({
+          command: "git",
+          args: commandInput.args,
+          cwd: commandInput.cwd,
+          env: commandEnv,
+          shellOnWindows: false,
+        });
+        const resolvedEnv = translateEnvForExecution(commandEnv, resolvedCommand.wsl);
         const child = yield* commandSpawner
           .spawn(
-            ChildProcess.make("git", commandInput.args, {
-              cwd: commandInput.cwd,
+            ChildProcess.make(resolvedCommand.command, [...resolvedCommand.args], {
+              cwd: resolvedCommand.cwd,
               env: {
                 ...process.env,
-                ...input.env,
-                ...trace2Monitor.env,
+                ...resolvedEnv,
               },
             }),
           )

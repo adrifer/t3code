@@ -27,6 +27,15 @@ export interface ResolvedCommandExecution {
   readonly wsl: WslExecutionTarget | null;
 }
 
+const WSL_PATH_ENV_KEYS = new Set([
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_TRACE2_EVENT",
+  "GIT_WORK_TREE",
+]);
+
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -169,6 +178,29 @@ export function translatePathForExecution(
   }
 
   return toWslPath(targetPath) ?? targetPath;
+}
+
+export function translateEnvForExecution(
+  env: NodeJS.ProcessEnv | undefined,
+  executionTarget: WslExecutionTarget | null,
+): NodeJS.ProcessEnv | undefined {
+  if (!env || !executionTarget) {
+    return env;
+  }
+
+  let translated: NodeJS.ProcessEnv | undefined;
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined || !WSL_PATH_ENV_KEYS.has(key)) {
+      continue;
+    }
+    const nextValue = toWslPath(value);
+    if (nextValue && nextValue !== value) {
+      translated ??= { ...env };
+      translated[key] = nextValue;
+    }
+  }
+
+  return translated ?? env;
 }
 
 export function resolveWslTerminalShell(target: WslExecutionTarget): {
