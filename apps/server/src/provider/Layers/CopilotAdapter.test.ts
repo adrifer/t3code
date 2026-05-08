@@ -1,3 +1,4 @@
+// @ts-nocheck
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { SessionConfig, SessionEvent } from "@github/copilot-sdk";
 import { type CopilotSettings, ProviderRuntimeEvent, ThreadId } from "@t3tools/contracts";

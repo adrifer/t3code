@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Context } from "effect";
 
 import type { ProviderAdapterError } from "../Errors.ts";

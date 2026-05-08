@@ -1,5 +1,10 @@
 import Mime from "@effect/platform-node/Mime";
-import { Data, Effect, FileSystem, Option, Path } from "effect";
+import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import { cast } from "effect/Function";
 import {
   HttpBody,
@@ -18,7 +23,6 @@ import {
 } from "./attachmentPaths.ts";
 import { resolveAttachmentPathById } from "./attachmentStore.ts";
 import { resolveStaticDir, ServerConfig } from "./config.ts";
-import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";

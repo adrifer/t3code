@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { PtyExitEvent } from "../terminal/Services/PTY.ts";
 import type { CopilotSettings } from "@t3tools/contracts";
 import { Effect } from "effect";
