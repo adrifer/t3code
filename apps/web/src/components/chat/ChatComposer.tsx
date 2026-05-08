@@ -96,6 +96,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
+import { getInteractionModesForProvider, INTERACTION_MODE_LABELS } from "../../interactionModes";
 import { getProviderInteractionModeToggle } from "../../providerModels";
 import {
   deriveProviderInstanceEntries,
@@ -181,17 +182,23 @@ function isInsideComposerFloatingLayer(element: Element): boolean {
 
 const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
   showInteractionModeToggle: boolean;
+  provider: ProviderDriverKind;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
   showPlanToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
-  onToggleInteractionMode: () => void;
+  onInteractionModeChange: (mode: ProviderInteractionMode) => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onTogglePlanSidebar: () => void;
 }) {
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
+  const interactionModes = getInteractionModesForProvider(props.provider);
+  const selectedInteractionMode = interactionModes.includes(props.interactionMode)
+    ? props.interactionMode
+    : "default";
+  const selectedInteractionModeLabel = INTERACTION_MODE_LABELS[selectedInteractionMode];
 
   return (
     <>
@@ -199,23 +206,33 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
       {props.showInteractionModeToggle ? (
         <>
-          <Button
-            variant="ghost"
-            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-            size="sm"
-            type="button"
-            onClick={props.onToggleInteractionMode}
-            title={
-              props.interactionMode === "plan"
-                ? "Plan mode — click to return to normal build mode"
-                : "Default mode — click to enter plan mode"
-            }
+          <Select
+            value={selectedInteractionMode}
+            onValueChange={(value) => {
+              const nextMode = interactionModes.find((mode) => mode === value);
+              if (nextMode) {
+                props.onInteractionModeChange(nextMode);
+              }
+            }}
           >
-            <BotIcon />
-            <span className="sr-only sm:not-sr-only">
-              {props.interactionMode === "plan" ? "Plan" : "Build"}
-            </span>
-          </Button>
+            <SelectTrigger
+              variant="ghost"
+              className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+              aria-label="Interaction mode"
+              title={`Interaction mode: ${selectedInteractionModeLabel}`}
+              size="sm"
+            >
+              <BotIcon className="size-4" />
+              <SelectValue>{selectedInteractionModeLabel}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup alignItemWithTrigger={false}>
+              {interactionModes.map((mode) => (
+                <SelectItem key={mode} value={mode}>
+                  {INTERACTION_MODE_LABELS[mode]}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
 
           <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
         </>
@@ -2373,12 +2390,13 @@ export const ChatComposer = memo(
                         showInteractionModeToggle={
                           composerProviderControls.showInteractionModeToggle
                         }
+                        provider={selectedProvider}
                         interactionMode={interactionMode}
                         runtimeMode={runtimeMode}
                         showPlanToggle={showPlanSidebarToggle}
                         planSidebarLabel={planSidebarLabel}
                         planSidebarOpen={planSidebarOpen}
-                        onToggleInteractionMode={toggleInteractionMode}
+                        onInteractionModeChange={handleInteractionModeChange}
                         onRuntimeModeChange={handleRuntimeModeChange}
                         onTogglePlanSidebar={togglePlanSidebar}
                       />
