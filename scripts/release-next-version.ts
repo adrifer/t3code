@@ -1,7 +1,3 @@
-import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
 const stableReleaseTagPattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 export interface StableReleaseTag {
@@ -66,10 +62,14 @@ export function deriveNextReleaseTag(latestTag: StableReleaseTag | null): string
 }
 
 function runGit(rootDir: string, args: ReadonlyArray<string>): string {
-  return execFileSync("git", ["-C", rootDir, ...args], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+  const result = Bun.spawnSync(["git", "-C", rootDir, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (!result.success) {
+    throw new Error(result.stderr.toString().trim() || `git ${args.join(" ")} failed`);
+  }
+  return result.stdout.toString().trim();
 }
 
 export function listGitTags(rootDir: string): ReadonlyArray<string> {
@@ -160,18 +160,18 @@ export function resolveNextReleaseTag(options: ReleaseTagOptions): {
 }
 
 const isMain =
-  process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  process.argv[1] !== undefined && process.argv[1] === new URL(import.meta.url).pathname;
 
 if (isMain) {
   const options = parseArgs(process.argv.slice(2));
   const rootDir = options.rootDir ?? process.cwd();
   const { latestTag, nextTag, headCommit } = resolveNextReleaseTag(options);
 
-  console.log(`Latest stable release tag: ${latestTag?.tag ?? "none"}`);
-  console.log(`Next stable release tag: ${nextTag}`);
-  console.log(`Current HEAD commit: ${headCommit}`);
+  process.stdout.write(`Latest stable release tag: ${latestTag?.tag ?? "none"}\n`);
+  process.stdout.write(`Next stable release tag: ${nextTag}\n`);
+  process.stdout.write(`Current HEAD commit: ${headCommit}\n`);
   createAnnotatedReleaseTag(rootDir, nextTag);
-  console.log(`Created annotated tag ${nextTag}.`);
+  process.stdout.write(`Created annotated tag ${nextTag}.\n`);
   pushReleaseTag(rootDir, options.remote, nextTag);
-  console.log(`Pushed ${nextTag} to ${options.remote}.`);
+  process.stdout.write(`Pushed ${nextTag} to ${options.remote}.\n`);
 }

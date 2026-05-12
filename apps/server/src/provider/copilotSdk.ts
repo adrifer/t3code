@@ -1,18 +1,16 @@
-import { accessSync, constants } from "node:fs";
-import path from "node:path";
-
-import type {
+import {
   CopilotSettings,
-  ModelCapabilities,
-  ServerProviderAuth,
-  ServerProviderModel,
+  ProviderDriverKind,
+  type ModelCapabilities,
+  type ServerProviderAuth,
+  type ServerProviderModel,
 } from "@t3tools/contracts";
 import {
   type CopilotClientOptions,
   type GetAuthStatusResponse,
   type ModelInfo,
 } from "@github/copilot-sdk";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import { createModelCapabilities, normalizeModelSlug } from "@t3tools/shared/model";
 
 import {
   resolveCommandExecution,
@@ -22,27 +20,27 @@ import {
 } from "../wsl.ts";
 
 const COPILOT_REASONING_LEVELS = [
-  { value: "xhigh", label: "Extra High" },
-  { value: "high", label: "High", isDefault: true },
-  { value: "medium", label: "Medium" },
-  { value: "low", label: "Low" },
+  { id: "xhigh", label: "Extra High" },
+  { id: "high", label: "High", isDefault: true },
+  { id: "medium", label: "Medium" },
+  { id: "low", label: "Low" },
 ] as const;
 
-export const COPILOT_DEFAULT_MODEL_CAPABILITIES = {
-  reasoningEffortLevels: [...COPILOT_REASONING_LEVELS],
-  supportsFastMode: false,
-  supportsThinkingToggle: false,
-  contextWindowOptions: [],
-  promptInjectedEffortLevels: [],
-} satisfies ModelCapabilities;
+export const COPILOT_DEFAULT_MODEL_CAPABILITIES = createModelCapabilities({
+  optionDescriptors: [
+    {
+      id: "reasoningEffort",
+      label: "Reasoning",
+      type: "select",
+      options: [...COPILOT_REASONING_LEVELS],
+      currentValue: "high",
+    },
+  ],
+}) satisfies ModelCapabilities;
 
-export const EMPTY_MODEL_CAPABILITIES = {
-  reasoningEffortLevels: [],
-  supportsFastMode: false,
-  supportsThinkingToggle: false,
-  contextWindowOptions: [],
-  promptInjectedEffortLevels: [],
-} satisfies ModelCapabilities;
+export const EMPTY_MODEL_CAPABILITIES = createModelCapabilities({
+  optionDescriptors: [],
+}) satisfies ModelCapabilities;
 
 function hasKnownCopilotCapabilities(slug: string | null | undefined): boolean {
   return typeof slug === "string" && /^(?:gpt-|claude-|goldeneye$)/.test(slug.trim());
@@ -60,19 +58,6 @@ function toReasoningEffortLabel(value: string): string {
       return "Low";
     default:
       return value;
-  }
-}
-
-function normalizePathValue(value: string): string {
-  return process.platform === "win32" ? value.toLowerCase() : value;
-}
-
-function isExecutableFile(candidate: string): boolean {
-  try {
-    accessSync(candidate, process.platform === "win32" ? constants.F_OK : constants.X_OK);
-    return true;
-  } catch {
-    return false;
   }
 }
 
@@ -116,14 +101,8 @@ function resolveCommandOnPath(
     return undefined;
   }
 
-  if (
-    path.isAbsolute(trimmed) ||
-    trimmed.includes(path.sep) ||
-    trimmed.includes("/") ||
-    trimmed.includes("\\")
-  ) {
-    const absolute = path.isAbsolute(trimmed) ? trimmed : path.resolve(trimmed);
-    return isExecutableFile(absolute) ? absolute : undefined;
+  if (trimmed.includes("/") || trimmed.includes("\\")) {
+    return trimmed;
   }
 
   const pathValue = resolvePathVariable(env);
@@ -137,21 +116,18 @@ function resolveCommandOnPath(
       : ([] as ReadonlyArray<string>);
   const hasKnownWindowsExtension =
     process.platform === "win32" &&
-    windowsExtensions.some((extension) => normalizePathValue(trimmed).endsWith(extension));
+    windowsExtensions.some((extension) => trimmed.toLowerCase().endsWith(extension));
   const commandCandidates =
     process.platform === "win32" && !hasKnownWindowsExtension
       ? windowsExtensions.map((extension) => `${trimmed}${extension}`)
       : [trimmed];
 
-  for (const entry of pathValue.split(path.delimiter)) {
+  const delimiter = process.platform === "win32" ? ";" : ":";
+  const separator = process.platform === "win32" ? "\\" : "/";
+  for (const entry of pathValue.split(delimiter)) {
     const normalizedEntry = entry.trim();
     if (!normalizedEntry) continue;
-    for (const candidate of commandCandidates) {
-      const absolute = path.join(normalizedEntry, candidate);
-      if (isExecutableFile(absolute)) {
-        return absolute;
-      }
-    }
+    return `${normalizedEntry}${normalizedEntry.endsWith(separator) ? "" : separator}${commandCandidates[0]}`;
   }
 
   return undefined;
@@ -187,28 +163,32 @@ function buildReasoningCapabilities(model: ModelInfo): ModelCapabilities | null 
   }
 
   return {
-    reasoningEffortLevels: supportedReasoningEfforts.map((value) => {
-      if (model.defaultReasoningEffort === value) {
-        return {
-          value,
-          label: toReasoningEffortLabel(value),
-          isDefault: true as const,
-        };
-      }
-      return {
-        value,
-        label: toReasoningEffortLabel(value),
-      };
-    }),
-    supportsFastMode: false,
-    supportsThinkingToggle: false,
-    contextWindowOptions: [],
-    promptInjectedEffortLevels: [],
+    optionDescriptors: [
+      {
+        id: "reasoningEffort",
+        label: "Reasoning",
+        type: "select",
+        options: supportedReasoningEfforts.map((value) => {
+          if (model.defaultReasoningEffort === value) {
+            return {
+              id: value,
+              label: toReasoningEffortLabel(value),
+              isDefault: true,
+            };
+          }
+          return {
+            id: value,
+            label: toReasoningEffortLabel(value),
+          };
+        }),
+        ...(model.defaultReasoningEffort ? { currentValue: model.defaultReasoningEffort } : {}),
+      },
+    ],
   };
 }
 
 export function buildCopilotSdkProviderModel(model: ModelInfo): ServerProviderModel | null {
-  const slug = normalizeModelSlug(model.id, "copilot");
+  const slug = normalizeModelSlug(model.id, ProviderDriverKind.make("copilot"));
   if (!slug) {
     return null;
   }

@@ -1,4 +1,4 @@
-import { ProviderInteractionMode, ProviderKind, RuntimeMode } from "@t3tools/contracts";
+import { ProviderDriverKind, ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
 import { EllipsisIcon, ListTodoIcon } from "lucide-react";
 import { getInteractionModesForProvider, INTERACTION_MODE_LABELS } from "../../interactionModes";
@@ -16,13 +16,14 @@ import {
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   activePlan: boolean;
   interactionMode: ProviderInteractionMode;
-  provider: ProviderKind;
+  provider: ProviderDriverKind;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
   onInteractionModeChange: (mode: ProviderInteractionMode) => void;
+  onToggleInteractionMode?: () => void;
   onTogglePlanSidebar: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {

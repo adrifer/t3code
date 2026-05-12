@@ -1,6 +1,6 @@
 import type { PtyExitEvent } from "../terminal/Services/PTY.ts";
 import type { CopilotSettings } from "@t3tools/contracts";
-import { Effect } from "effect";
+import * as Effect from "effect/Effect";
 
 import { PtyAdapter } from "../terminal/Services/PTY.ts";
 import { resolveCommandExecution } from "../wsl.ts";

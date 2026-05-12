@@ -115,6 +115,13 @@ function createBaseServerConfig(): ServerConfig {
           shadowHomePath: "",
           customModels: [],
         },
+        copilot: {
+          enabled: true,
+          binaryPath: "",
+          useWsl: false,
+          wslDistro: "",
+          customModels: [],
+        },
         claudeAgent: {
           enabled: true,
           binaryPath: "",

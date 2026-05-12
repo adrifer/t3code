@@ -300,7 +300,7 @@ describe("CompactComposerControlsMenu", () => {
       <CompactComposerControlsMenu
         activePlan={false}
         interactionMode="default"
-        provider="claudeAgent"
+        provider={ProviderDriverKind.make("claudeAgent")}
         planSidebarLabel="Plan"
         planSidebarOpen={false}
         runtimeMode="approval-required"

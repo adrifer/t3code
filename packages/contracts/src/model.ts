@@ -128,6 +128,7 @@ export const ModelCapabilities = Schema.Struct({
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 
 const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
+const COPILOT_DRIVER_KIND = ProviderDriverKind.make("copilot");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
@@ -137,6 +138,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL = "gpt-5.4-mini";
 
 export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
+  [COPILOT_DRIVER_KIND]: DEFAULT_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-sonnet-4-6",
   [CURSOR_DRIVER_KIND]: "auto",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
@@ -147,6 +149,7 @@ export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   Record<ProviderDriverKind, string>
 > = {
   [CODEX_DRIVER_KIND]: DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  [COPILOT_DRIVER_KIND]: DEFAULT_GIT_TEXT_GENERATION_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-haiku-4-5",
   [CURSOR_DRIVER_KIND]: "composer-2",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
@@ -162,6 +165,43 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
     "gpt-5.3": "gpt-5.3-codex",
     "5.3-spark": "gpt-5.3-codex-spark",
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
+  },
+  [COPILOT_DRIVER_KIND]: {
+    "5.4": "gpt-5.4",
+    "5.4-mini": "gpt-5.4-mini",
+    "gpt-5.4-mini": "gpt-5.4-mini",
+    "5-mini": "gpt-5-mini",
+    "gpt-5-mini": "gpt-5-mini",
+    "5.2": "gpt-5.2",
+    "gpt-5.2": "gpt-5.2",
+    "5.1": "gpt-5.1",
+    "gpt-5.1": "gpt-5.1",
+    "4.1": "gpt-4.1",
+    "gpt-4.1": "gpt-4.1",
+    "5.3": "gpt-5.3-codex",
+    "gpt-5.3": "gpt-5.3-codex",
+    "5.3-spark": "gpt-5.3-codex-spark",
+    "gpt-5.3-spark": "gpt-5.3-codex-spark",
+    "5.2-codex": "gpt-5.2-codex",
+    "gpt-5.2-codex": "gpt-5.2-codex",
+    sonnet: "claude-sonnet-4-6",
+    "sonnet-4.6": "claude-sonnet-4-6",
+    "claude-sonnet-4.6": "claude-sonnet-4-6",
+    "claude-sonnet-4-6-20251117": "claude-sonnet-4-6",
+    "claude-sonnet-4.5": "claude-sonnet-4-5",
+    "claude-sonnet-4": "claude-sonnet-4",
+    haiku: "claude-haiku-4-5",
+    "haiku-4.5": "claude-haiku-4-5",
+    "claude-haiku-4.5": "claude-haiku-4-5",
+    opus: "claude-opus-4-7",
+    "opus-4.7": "claude-opus-4-7",
+    "claude-opus-4.7": "claude-opus-4-7",
+    "opus-4.6": "claude-opus-4-6",
+    "claude-opus-4.6": "claude-opus-4-6",
+    "claude-opus-4-6-20251117": "claude-opus-4-6",
+    "claude-opus-4.6-fast": "claude-opus-4-6-fast",
+    "claude-opus-4.5": "claude-opus-4-5",
+    goldeneye: "goldeneye",
   },
   [CLAUDE_DRIVER_KIND]: {
     opus: "claude-opus-4-7",
@@ -197,6 +237,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
 
 export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>> = {
   [CODEX_DRIVER_KIND]: "Codex",
+  [COPILOT_DRIVER_KIND]: "GitHub Copilot",
   [CLAUDE_DRIVER_KIND]: "Claude",
   [CURSOR_DRIVER_KIND]: "Cursor",
   [OPENCODE_DRIVER_KIND]: "OpenCode",

@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-
 import {
   CopilotClient,
   type MessageOptions,
@@ -12,9 +10,11 @@ import {
 import {
   type ChatAttachment,
   type CopilotSettings,
-  type CopilotModelSelection,
   DEFAULT_MODEL_BY_PROVIDER,
   EventId,
+  type ModelSelection,
+  ProviderDriverKind,
+  type ProviderInstanceId,
   RuntimeItemId,
   RuntimeRequestId,
   type ToolLifecycleItemType,
@@ -27,30 +27,27 @@ import {
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
 } from "@t3tools/contracts";
-import {
-  normalizeCopilotModelOptionsWithCapabilities,
-  resolveApiModelId,
-} from "@t3tools/shared/model";
-import { Effect, Layer, Queue, Stream } from "effect";
+import { getModelSelectionReasoningEffort, resolveApiModelId } from "@t3tools/shared/model";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
 
 import {
   ProviderAdapterRequestError,
   ProviderAdapterSessionClosedError,
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
+  type ProviderAdapterError,
 } from "../Errors.ts";
-import { CopilotAdapter, type CopilotAdapterShape } from "../Services/CopilotAdapter.ts";
+import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
-import {
-  buildCopilotSdkClientLaunch,
-  getCopilotModelCapabilities,
-  translateCopilotWorkingDirectory,
-} from "../copilotSdk.ts";
+import { buildCopilotSdkClientLaunch, translateCopilotWorkingDirectory } from "../copilotSdk.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
-const PROVIDER = "copilot" as const;
+const PROVIDER = ProviderDriverKind.make("copilot");
 const IMAGE_PATH_REGEX = /\.(avif|bmp|gif|heic|ico|jpe?g|png|svg|webp)$/i;
 
 type CopilotSessionMode = "interactive" | "plan" | "autopilot";
@@ -98,6 +95,8 @@ interface CopilotSdkClientShape {
 }
 
 export interface CopilotAdapterLiveOptions {
+  readonly settings: CopilotSettings;
+  readonly environment?: NodeJS.ProcessEnv;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   readonly createClient?: (input: {
@@ -214,7 +213,7 @@ interface CopilotSessionContext {
 }
 
 function nowIso(): string {
-  return new Date().toISOString();
+  return DateTime.formatIso(DateTime.nowUnsafe());
 }
 
 function nextEventId() {
@@ -860,11 +859,13 @@ function rebuildTurnsFromHistory(events: ReadonlyArray<SessionEvent>): {
   return { turns, sessionBoundaryEventId };
 }
 
-const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
-  options?: CopilotAdapterLiveOptions,
+export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
+  options: CopilotAdapterLiveOptions & { readonly instanceId: ProviderInstanceId },
 ) {
   const serverConfig = yield* ServerConfig;
-  const serverSettingsService = yield* ServerSettingsService;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const instanceId = options.instanceId;
+  const environment = options?.environment ?? process.env;
   const nativeEventLogger =
     options?.nativeEventLogger ??
     (options?.nativeEventLogPath !== undefined
@@ -937,12 +938,12 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     modelSelection: ProviderSendTurnInput["modelSelection"] | undefined,
     operation: string,
   ) => {
-    if (modelSelection && modelSelection.provider !== PROVIDER) {
+    if (modelSelection && modelSelection.instanceId !== instanceId) {
       return Effect.fail(
         new ProviderAdapterValidationError({
           provider: PROVIDER,
           operation,
-          issue: `Expected provider '${PROVIDER}' but received '${modelSelection.provider}'.`,
+          issue: `Expected provider instance '${instanceId}' but received '${modelSelection.instanceId}'.`,
         }),
       );
     }
@@ -1802,7 +1803,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         }),
     });
 
-  const snapshotThread: CopilotAdapterShape["readThread"] = (threadId) =>
+  const snapshotThread: ProviderAdapterShape<ProviderAdapterError>["readThread"] = (threadId) =>
     Effect.gen(function* () {
       const context = yield* ensureContext(threadId);
       return {
@@ -1814,7 +1815,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       };
     });
 
-  const startSession: CopilotAdapterShape["startSession"] = (input) =>
+  const startSession: ProviderAdapterShape<ProviderAdapterError>["startSession"] = (input) =>
     Effect.gen(function* () {
       if (input.provider !== undefined && input.provider !== PROVIDER) {
         return yield* new ProviderAdapterValidationError({
@@ -1840,32 +1841,17 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         sessions.delete(input.threadId);
       }
 
-      const settings = yield* serverSettingsService.getSettings.pipe(
-        Effect.map((serverSettings) => serverSettings.providers.copilot),
-        Effect.mapError(
-          (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: "startSession",
-              detail: "Failed to load Copilot settings.",
-              cause,
-            }),
-        ),
-      );
+      const settings = options.settings;
 
-      const modelSelection: CopilotModelSelection = (input.modelSelection as
-        | CopilotModelSelection
-        | undefined) ?? {
-        provider: PROVIDER,
-        model: DEFAULT_MODEL_BY_PROVIDER[PROVIDER],
+      const modelSelection: ModelSelection = input.modelSelection ?? {
+        instanceId,
+        model: DEFAULT_MODEL_BY_PROVIDER[PROVIDER] ?? "gpt-5.4",
       };
-      const normalizedOptions = normalizeCopilotModelOptionsWithCapabilities(
-        getCopilotModelCapabilities(modelSelection.model),
-        modelSelection.options,
-      );
+      const reasoningEffort = getModelSelectionReasoningEffort(modelSelection);
       const launch = buildCopilotSdkClientLaunch({
         settings,
         cwd: input.cwd,
+        env: environment,
       });
       const client =
         options?.createClient?.({
@@ -1881,11 +1867,9 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       let contextRef: CopilotSessionContext | undefined;
       const workingDirectory = translateCopilotWorkingDirectory(input.cwd, launch.executionTarget);
       const sessionConfig: SessionConfig = {
-        model: resolveApiModelId(modelSelection),
+        model: resolveApiModelId(modelSelection, PROVIDER),
         streaming: true,
-        ...(normalizedOptions?.reasoningEffort
-          ? { reasoningEffort: normalizedOptions.reasoningEffort as CopilotReasoningEffort }
-          : {}),
+        ...(reasoningEffort ? { reasoningEffort: reasoningEffort as CopilotReasoningEffort } : {}),
         onPermissionRequest: (request) => {
           if (!contextRef) {
             return { kind: "user-not-available" };
@@ -1998,34 +1982,39 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     attachments: ReadonlyArray<ChatAttachment>,
   ): Effect.Effect<NonNullable<MessageOptions["attachments"]>, ProviderAdapterRequestError> =>
     Effect.forEach(attachments, (attachment) =>
-      Effect.tryPromise({
-        try: async () => {
-          const resolvedPath = resolveAttachmentPath({
-            attachmentsDir: serverConfig.attachmentsDir,
-            attachment,
-          });
-          if (!resolvedPath) {
-            throw new Error(`Invalid attachment id '${attachment.id}'.`);
-          }
-          const bytes = await readFile(resolvedPath);
-          return {
-            type: "blob" as const,
-            data: bytes.toString("base64"),
-            mimeType: attachment.mimeType,
-            displayName: attachment.name,
-          };
-        },
-        catch: (cause) =>
-          new ProviderAdapterRequestError({
+      Effect.gen(function* () {
+        const resolvedPath = resolveAttachmentPath({
+          attachmentsDir: serverConfig.attachmentsDir,
+          attachment,
+        });
+        if (!resolvedPath) {
+          return yield* new ProviderAdapterRequestError({
             provider: PROVIDER,
             method: "session/send",
-            detail: toMessage(cause, "Failed to read Copilot image attachment."),
-            cause,
-          }),
+            detail: `Invalid attachment id '${attachment.id}'.`,
+          });
+        }
+        const bytes = yield* fileSystem.readFile(resolvedPath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "session/send",
+                detail: `Failed to read Copilot image attachment: ${cause.message}.`,
+                cause,
+              }),
+          ),
+        );
+        return {
+          type: "blob" as const,
+          data: Buffer.from(bytes).toString("base64"),
+          mimeType: attachment.mimeType,
+          displayName: attachment.name,
+        };
       }),
     );
 
-  const sendTurn: CopilotAdapterShape["sendTurn"] = (input) =>
+  const sendTurn: ProviderAdapterShape<ProviderAdapterError>["sendTurn"] = (input) =>
     Effect.gen(function* () {
       const context = yield* ensureOpenContext(input.threadId);
       yield* validateModelSelection(input.modelSelection, "sendTurn");
@@ -2038,16 +2027,11 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         });
       }
 
-      const modelSelection: CopilotModelSelection = (input.modelSelection as
-        | CopilotModelSelection
-        | undefined) ?? {
-        provider: PROVIDER,
-        model: context.session.model ?? DEFAULT_MODEL_BY_PROVIDER[PROVIDER],
+      const modelSelection: ModelSelection = input.modelSelection ?? {
+        instanceId,
+        model: context.session.model ?? DEFAULT_MODEL_BY_PROVIDER[PROVIDER] ?? "gpt-5.4",
       };
-      const normalizedOptions = normalizeCopilotModelOptionsWithCapabilities(
-        getCopilotModelCapabilities(modelSelection.model),
-        modelSelection.options,
-      );
+      const reasoningEffort = getModelSelectionReasoningEffort(modelSelection);
       const interactionMode = input.interactionMode;
       const promptInput =
         input.input?.trim() ||
@@ -2077,10 +2061,10 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         context.currentMode = desiredMode;
       }
 
-      const apiModel = resolveApiModelId(modelSelection);
+      const apiModel = resolveApiModelId(modelSelection, PROVIDER);
       if (context.session.model !== modelSelection.model) {
-        const setModelOptions = normalizedOptions?.reasoningEffort
-          ? { reasoningEffort: normalizedOptions.reasoningEffort as CopilotReasoningEffort }
+        const setModelOptions = reasoningEffort
+          ? { reasoningEffort: reasoningEffort as CopilotReasoningEffort }
           : undefined;
         yield* Effect.tryPromise({
           try: () => context.sdkSession.setModel(apiModel, setModelOptions),
@@ -2133,9 +2117,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         itemId,
         payload: {
           model: modelSelection.model,
-          ...(normalizedOptions?.reasoningEffort
-            ? { effort: normalizedOptions.reasoningEffort }
-            : {}),
+          ...(reasoningEffort ? { effort: reasoningEffort } : {}),
         },
       });
 
@@ -2169,7 +2151,10 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       } satisfies ProviderTurnStartResult;
     });
 
-  const interruptTurn: CopilotAdapterShape["interruptTurn"] = (threadId, turnId) =>
+  const interruptTurn: ProviderAdapterShape<ProviderAdapterError>["interruptTurn"] = (
+    threadId,
+    turnId,
+  ) =>
     Effect.gen(function* () {
       const context = yield* ensureOpenContext(threadId);
       if (!context.activeTurn) {
@@ -2193,7 +2178,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       });
     });
 
-  const respondToRequest: CopilotAdapterShape["respondToRequest"] = (
+  const respondToRequest: ProviderAdapterShape<ProviderAdapterError>["respondToRequest"] = (
     threadId,
     requestId,
     decision,
@@ -2213,7 +2198,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       }
     });
 
-  const respondToUserInput: CopilotAdapterShape["respondToUserInput"] = (
+  const respondToUserInput: ProviderAdapterShape<ProviderAdapterError>["respondToUserInput"] = (
     threadId,
     requestId,
     answers,
@@ -2233,7 +2218,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       }
     });
 
-  const stopSession: CopilotAdapterShape["stopSession"] = (threadId) =>
+  const stopSession: ProviderAdapterShape<ProviderAdapterError>["stopSession"] = (threadId) =>
     Effect.gen(function* () {
       const context = yield* ensureContext(threadId);
       settlePendingPermissions(context, "cancel");
@@ -2270,14 +2255,14 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       sessions.delete(threadId);
     });
 
-  const listSessions: CopilotAdapterShape["listSessions"] = () =>
+  const listSessions: ProviderAdapterShape<ProviderAdapterError>["listSessions"] = () =>
     Effect.succeed(
       Array.from(sessions.values())
         .map((context) => context.session)
         .filter((session) => session.status !== "closed"),
     );
 
-  const hasSession: CopilotAdapterShape["hasSession"] = (threadId) =>
+  const hasSession: ProviderAdapterShape<ProviderAdapterError>["hasSession"] = (threadId) =>
     Effect.succeed(
       (() => {
         const context = sessions.get(threadId);
@@ -2285,7 +2270,10 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       })(),
     );
 
-  const rollbackThread: CopilotAdapterShape["rollbackThread"] = (threadId, numTurns) =>
+  const rollbackThread: ProviderAdapterShape<ProviderAdapterError>["rollbackThread"] = (
+    threadId,
+    numTurns,
+  ) =>
     Effect.gen(function* () {
       const context = yield* ensureContext(threadId);
       if (!Number.isInteger(numTurns) || numTurns < 1) {
@@ -2343,7 +2331,7 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       };
     });
 
-  const stopAll: CopilotAdapterShape["stopAll"] = () =>
+  const stopAll: ProviderAdapterShape<ProviderAdapterError>["stopAll"] = () =>
     Effect.forEach([...sessions.values()], (context) =>
       stopSessionContext(context).pipe(
         Effect.catch(() => Effect.void),
@@ -2380,11 +2368,5 @@ const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     rollbackThread,
     stopAll,
     streamEvents: Stream.fromQueue(runtimeEventQueue),
-  } satisfies CopilotAdapterShape;
+  } satisfies ProviderAdapterShape<ProviderAdapterError>;
 });
-
-export function makeCopilotAdapterLive(options?: CopilotAdapterLiveOptions) {
-  return Layer.effect(CopilotAdapter, makeCopilotAdapter(options));
-}
-
-export const CopilotAdapterLive = makeCopilotAdapterLive();

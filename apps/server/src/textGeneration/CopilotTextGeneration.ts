@@ -1,40 +1,39 @@
-import { Effect, Layer, Schema, Stream } from "effect";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   type ChatAttachment,
-  CopilotModelSelection,
+  type CopilotSettings,
+  type ModelSelection,
+  ProviderDriverKind,
   TextGenerationError,
 } from "@t3tools/contracts";
-import {
-  resolveApiModelId,
-  normalizeCopilotModelOptionsWithCapabilities,
-} from "@t3tools/shared/model";
+import { getModelSelectionReasoningEffort, resolveApiModelId } from "@t3tools/shared/model";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
-import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
+import { resolveAttachmentPath } from "../attachmentStore.ts";
+import { ServerConfig } from "../config.ts";
 import {
   resolveCommandExecution,
   resolveWslExecutionTarget,
   translatePathForExecution,
-} from "../../wsl.ts";
-import { getCopilotModelCapabilities } from "../../provider/Layers/CopilotProvider.ts";
-import { type TextGenerationShape, TextGeneration } from "../Services/TextGeneration.ts";
+} from "../wsl.ts";
+import { type TextGenerationShape } from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
-} from "../Prompts.ts";
+} from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
   toJsonSchemaObject,
-} from "../Utils.ts";
+} from "./TextGenerationUtils.ts";
 
 type CopilotJsonLine = {
   readonly type?: string;
@@ -43,10 +42,14 @@ type CopilotJsonLine = {
   readonly usage?: unknown;
 };
 
-const makeCopilotTextGeneration = Effect.gen(function* () {
+const COPILOT_DRIVER_KIND = ProviderDriverKind.make("copilot");
+
+export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(function* (
+  copilotSettings: CopilotSettings,
+  environment: NodeJS.ProcessEnv = process.env,
+) {
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig);
-  const serverSettingsService = yield* Effect.service(ServerSettingsService);
 
   const readStreamAsString = <E>(
     operation: string,
@@ -85,20 +88,17 @@ const makeCopilotTextGeneration = Effect.gen(function* () {
     return imagePaths;
   };
 
-  const resolveImagePathsForCwd = Effect.fn("CopilotTextGeneration.resolveImagePathsForCwd")(
-    function* (cwd: string, attachments: ReadonlyArray<ChatAttachment> | undefined) {
-      const copilotSettings = yield* Effect.map(
-        serverSettingsService.getSettings,
-        (settings) => settings.providers.copilot,
-      ).pipe(Effect.catch(() => Effect.undefined));
-      const executionTarget = resolveWslExecutionTarget({
-        cwd,
-        enabled: copilotSettings?.useWsl,
-        distro: copilotSettings?.wslDistro,
-      });
-      return materializeImageAttachmentPaths(attachments, executionTarget);
-    },
-  );
+  const resolveImagePathsForCwd = (
+    cwd: string,
+    attachments: ReadonlyArray<ChatAttachment> | undefined,
+  ): ReadonlyArray<string> => {
+    const executionTarget = resolveWslExecutionTarget({
+      cwd,
+      enabled: copilotSettings.useWsl,
+      distro: copilotSettings.wslDistro,
+    });
+    return materializeImageAttachmentPaths(attachments, executionTarget);
+  };
 
   const buildStructuredPrompt = (
     prompt: string,
@@ -134,7 +134,8 @@ ${schemaJson}
           .split(/\r?\n/)
           .map((line) => line.trim())
           .filter((line) => line.length > 0);
-        const events = lines.map((line) => JSON.parse(line) as CopilotJsonLine);
+        const decodeJsonLine = Schema.decodeUnknownSync(Schema.UnknownFromJsonString);
+        const events = lines.map((line) => decodeJsonLine(line) as CopilotJsonLine);
         const assistantMessage = [...events]
           .toReversed()
           .find(
@@ -177,21 +178,12 @@ ${schemaJson}
     prompt: string;
     outputSchemaJson: S;
     imagePaths?: ReadonlyArray<string>;
-    modelSelection: CopilotModelSelection;
+    modelSelection: ModelSelection;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
-    const copilotSettings = yield* Effect.map(
-      serverSettingsService.getSettings,
-      (settings) => settings.providers.copilot,
-    ).pipe(Effect.catch(() => Effect.undefined));
-
-    const normalizedOptions = normalizeCopilotModelOptionsWithCapabilities(
-      getCopilotModelCapabilities(modelSelection.model),
-      modelSelection.options,
-    );
-
     const structuredPrompt = buildStructuredPrompt(prompt, outputSchemaJson, imagePaths);
+    const reasoningEffort = getModelSelectionReasoningEffort(modelSelection);
     const execution = resolveCommandExecution({
-      command: copilotSettings?.binaryPath || "copilot",
+      command: copilotSettings.binaryPath || "copilot",
       args: [
         "-s",
         "--output-format",
@@ -199,17 +191,16 @@ ${schemaJson}
         "--allow-all-tools",
         "--allow-all-paths",
         "--model",
-        resolveApiModelId(modelSelection),
-        ...(normalizedOptions?.reasoningEffort
-          ? ["--effort", normalizedOptions.reasoningEffort]
-          : []),
+        resolveApiModelId(modelSelection, COPILOT_DRIVER_KIND),
+        ...(reasoningEffort ? ["--effort", reasoningEffort] : []),
         "-p",
         structuredPrompt,
       ],
       cwd,
+      env: environment,
       wsl: {
-        enabled: copilotSettings?.useWsl,
-        distro: copilotSettings?.wslDistro,
+        enabled: copilotSettings.useWsl,
+        distro: copilotSettings.wslDistro,
         shellProfile: true,
       },
     });
@@ -263,17 +254,7 @@ ${schemaJson}
     }
 
     const parsed = yield* parseCopilotJsonOutput(operation, stdout);
-    const structuredOutput = yield* Effect.try({
-      try: () => JSON.parse(parsed.content),
-      catch: (cause) =>
-        new TextGenerationError({
-          operation,
-          detail: "Copilot did not return valid JSON structured output.",
-          cause,
-        }),
-    });
-
-    return yield* Schema.decodeEffect(outputSchemaJson)(structuredOutput).pipe(
+    return yield* Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson))(parsed.content).pipe(
       Effect.catchTag("SchemaError", (cause) =>
         Effect.fail(
           new TextGenerationError({
@@ -289,7 +270,7 @@ ${schemaJson}
   const generateCommitMessage: TextGenerationShape["generateCommitMessage"] = Effect.fn(
     "CopilotTextGeneration.generateCommitMessage",
   )(function* (input) {
-    if (input.modelSelection.provider !== "copilot") {
+    if (String(input.modelSelection.instanceId) !== String(COPILOT_DRIVER_KIND)) {
       return yield* new TextGenerationError({
         operation: "generateCommitMessage",
         detail: "Invalid model selection.",
@@ -356,7 +337,7 @@ ${schemaJson}
       diffPatch: input.diffPatch,
     });
 
-    if (input.modelSelection.provider !== "copilot") {
+    if (String(input.modelSelection.instanceId) !== String(COPILOT_DRIVER_KIND)) {
       return yield* new TextGenerationError({
         operation: "generatePrContent",
         detail: "Invalid model selection.",
@@ -380,13 +361,13 @@ ${schemaJson}
   const generateBranchName: TextGenerationShape["generateBranchName"] = Effect.fn(
     "CopilotTextGeneration.generateBranchName",
   )(function* (input) {
-    const imagePaths = yield* resolveImagePathsForCwd(input.cwd, input.attachments);
+    const imagePaths = resolveImagePathsForCwd(input.cwd, input.attachments);
     const { prompt, outputSchema } = buildBranchNamePrompt({
       message: input.message,
       attachments: input.attachments,
     });
 
-    if (input.modelSelection.provider !== "copilot") {
+    if (String(input.modelSelection.instanceId) !== String(COPILOT_DRIVER_KIND)) {
       return yield* new TextGenerationError({
         operation: "generateBranchName",
         detail: "Invalid model selection.",
@@ -410,13 +391,13 @@ ${schemaJson}
   const generateThreadTitle: TextGenerationShape["generateThreadTitle"] = Effect.fn(
     "CopilotTextGeneration.generateThreadTitle",
   )(function* (input) {
-    const imagePaths = yield* resolveImagePathsForCwd(input.cwd, input.attachments);
+    const imagePaths = resolveImagePathsForCwd(input.cwd, input.attachments);
     const { prompt, outputSchema } = buildThreadTitlePrompt({
       message: input.message,
       attachments: input.attachments,
     });
 
-    if (input.modelSelection.provider !== "copilot") {
+    if (String(input.modelSelection.instanceId) !== String(COPILOT_DRIVER_KIND)) {
       return yield* new TextGenerationError({
         operation: "generateThreadTitle",
         detail: "Invalid model selection.",
@@ -444,5 +425,3 @@ ${schemaJson}
     generateThreadTitle,
   } satisfies TextGenerationShape;
 });
-
-export const CopilotTextGenerationLive = Layer.effect(TextGeneration, makeCopilotTextGeneration);

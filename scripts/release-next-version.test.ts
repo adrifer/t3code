@@ -1,8 +1,3 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { assert, describe, it } from "@effect/vitest";
 
 import {
@@ -11,19 +6,27 @@ import {
   parseStableReleaseTag,
 } from "./release-next-version.ts";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 
 function runGit(cwd: string, args: ReadonlyArray<string>): string {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
+  return runCommand(cwd, "git", args);
 }
 
-function createCommit(repoDir: string, name: string, contents: string): void {
-  const filePath = resolve(repoDir, name);
-  writeFileSync(filePath, contents);
+function runCommand(cwd: string, command: string, args: ReadonlyArray<string>): string {
+  const result = Bun.spawnSync([command, ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (!result.success) {
+    throw new Error(result.stderr.toString().trim() || `${command} ${args.join(" ")} failed`);
+  }
+  return result.stdout.toString().trim();
+}
+
+async function createCommit(repoDir: string, name: string, contents: string): Promise<void> {
+  const filePath = `${repoDir}/${name}`;
+  await Bun.write(filePath, contents);
   runGit(repoDir, ["add", name]);
   runGit(repoDir, ["commit", "-m", `Add ${name}`]);
 }
@@ -50,11 +53,11 @@ describe("release-next-version", () => {
     assert.equal(deriveNextReleaseTag(latestTag), "v0.0.1");
   });
 
-  it("creates and pushes the next stable tag from HEAD", () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), "t3-release-tag-"));
-    const repoDir = resolve(tempRoot, "repo");
-    const remoteDir = resolve(tempRoot, "remote.git");
-    mkdirSync(repoDir);
+  it("creates and pushes the next stable tag from HEAD", async () => {
+    const tempRoot = runCommand(process.cwd(), "mktemp", ["-d", "-t", "t3-release-tag-XXXXXX"]);
+    const repoDir = `${tempRoot}/repo`;
+    const remoteDir = `${tempRoot}/remote.git`;
+    runCommand(tempRoot, "mkdir", [repoDir]);
 
     try {
       runGit(tempRoot, ["init", "--bare", remoteDir]);
@@ -62,20 +65,14 @@ describe("release-next-version", () => {
       runGit(repoDir, ["config", "user.name", "T3 Test"]);
       runGit(repoDir, ["config", "user.email", "t3@example.com"]);
 
-      createCommit(repoDir, "README.md", "# temp repo\n");
+      await createCommit(repoDir, "README.md", "# temp repo\n");
       runGit(repoDir, ["remote", "add", "origin", remoteDir]);
       runGit(repoDir, ["tag", "-a", "v0.0.5", "-m", "Release v0.0.5"]);
       runGit(repoDir, ["tag", "-a", "v0.0.5-test.1", "-m", "Release v0.0.5-test.1"]);
 
-      const output = execFileSync(
-        process.execPath,
-        [resolve(repoRoot, "scripts/release-next-version.ts")],
-        {
-          cwd: repoDir,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
+      const output = runCommand(repoDir, process.execPath, [
+        `${repoRoot}/scripts/release-next-version.ts`,
+      ]);
 
       assert.match(output, /Latest stable release tag: v0\.0\.5/);
       assert.match(output, /Next stable release tag: v0\.0\.6/);
@@ -84,7 +81,7 @@ describe("release-next-version", () => {
       assert.equal(runGit(repoDir, ["tag", "--list", "v0.0.6"]), "v0.0.6");
       assert.equal(runGit(remoteDir, ["tag", "--list", "v0.0.6"]), "v0.0.6");
     } finally {
-      rmSync(tempRoot, { recursive: true, force: true });
+      runCommand(process.cwd(), "rm", ["-rf", tempRoot]);
     }
   });
 });

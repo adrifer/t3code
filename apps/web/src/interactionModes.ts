@@ -1,4 +1,6 @@
-import type { ProviderInteractionMode, ProviderKind } from "@t3tools/contracts";
+import { type ProviderInteractionMode, ProviderDriverKind } from "@t3tools/contracts";
+
+const COPILOT_DRIVER_KIND = ProviderDriverKind.make("copilot");
 
 export const INTERACTION_MODE_LABELS: Record<ProviderInteractionMode, string> = {
   default: "Build",
@@ -7,14 +9,16 @@ export const INTERACTION_MODE_LABELS: Record<ProviderInteractionMode, string> = 
 };
 
 export function getInteractionModesForProvider(
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
 ): ReadonlyArray<ProviderInteractionMode> {
-  return provider === "copilot" ? ["default", "plan", "autopilot"] : ["default", "plan"];
+  return provider === COPILOT_DRIVER_KIND ? ["default", "plan", "autopilot"] : ["default", "plan"];
 }
 
 export function normalizeInteractionModeForProvider(
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
   interactionMode: ProviderInteractionMode,
 ): ProviderInteractionMode {
-  return provider === "copilot" || interactionMode !== "autopilot" ? interactionMode : "default";
+  return provider === COPILOT_DRIVER_KIND || interactionMode !== "autopilot"
+    ? interactionMode
+    : "default";
 }

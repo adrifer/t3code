@@ -1,11 +1,16 @@
 import { CopilotClient, type GetAuthStatusResponse, type ModelInfo } from "@github/copilot-sdk";
-import type {
+import {
   CopilotSettings,
-  ServerProviderAuth,
-  ServerProviderModel,
-  ServerProviderState,
+  ProviderDriverKind,
+  ServerSettingsError,
+  type ServerProviderAuth,
+  type ServerProviderModel,
+  type ServerProviderState,
 } from "@t3tools/contracts";
-import { Duration, Effect, Equal, Layer, Option, Stream } from "effect";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 
 import {
   buildCopilotSdkAuth,
@@ -18,19 +23,19 @@ import {
   FALLBACK_COPILOT_MODEL_CATALOG,
   type CopilotModelCatalogEntry,
 } from "../copilotModelCatalog.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   buildServerProvider,
   DEFAULT_TIMEOUT_MS,
   nonEmptyTrimmed,
   providerModelsFromSettings,
 } from "../providerSnapshot.ts";
-import { CopilotProvider } from "../Services/CopilotProvider.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
-import { ServerSettingsError } from "@t3tools/contracts";
 import { ProviderAdapterRequestError } from "../Errors.ts";
 
-const PROVIDER = "copilot" as const;
+const PROVIDER = ProviderDriverKind.make("copilot");
+const COPILOT_PRESENTATION = {
+  displayName: "GitHub Copilot",
+  showInteractionModeToggle: true,
+} as const;
 const COPILOT_AUTH_TOKEN_ENV_VARS = ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"] as const;
 const SDK_STATUS_TIMEOUT = Duration.millis(DEFAULT_TIMEOUT_MS * 2);
 
@@ -51,8 +56,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> =
 
 export { getCopilotModelCapabilities } from "../copilotSdk.ts";
 
-function createInitialCopilotProviderSnapshot(settings: CopilotSettings) {
-  const checkedAt = new Date().toISOString();
+export function createInitialCopilotProviderSnapshot(settings: CopilotSettings) {
+  const checkedAt = DateTime.formatIso(DateTime.nowUnsafe());
   const models = providerModelsFromSettings(
     BUILT_IN_MODELS,
     PROVIDER,
@@ -62,7 +67,8 @@ function createInitialCopilotProviderSnapshot(settings: CopilotSettings) {
 
   if (!settings.enabled) {
     return buildServerProvider({
-      provider: PROVIDER,
+      driver: PROVIDER,
+      presentation: COPILOT_PRESENTATION,
       enabled: false,
       checkedAt,
       models,
@@ -77,7 +83,8 @@ function createInitialCopilotProviderSnapshot(settings: CopilotSettings) {
   }
 
   return buildServerProvider({
-    provider: PROVIDER,
+    driver: PROVIDER,
+    presentation: COPILOT_PRESENTATION,
     enabled: true,
     checkedAt,
     models,
@@ -235,107 +242,74 @@ const probeCopilotSdkStatus = Effect.fn("probeCopilotSdkStatus")(function* (
   };
 });
 
-export const checkCopilotProviderStatus = Effect.gen(function* () {
-  const settingsService = yield* ServerSettingsService;
-  const copilotSettings = yield* settingsService.getSettings.pipe(
-    Effect.map((settings) => settings.providers.copilot),
-    Effect.mapError(
-      (cause) =>
-        new ServerSettingsError({
-          settingsPath: "settings.json",
-          detail: "failed to load Copilot settings",
-          cause,
-        }),
-    ),
-  );
-
-  const checkedAt = new Date().toISOString();
-  const defaultModels = providerModelsFromSettings(
-    BUILT_IN_MODELS,
-    PROVIDER,
-    copilotSettings.customModels,
-    COPILOT_DEFAULT_MODEL_CAPABILITIES,
-  );
-
-  if (!copilotSettings.enabled) {
-    return buildServerProvider({
-      provider: PROVIDER,
-      enabled: false,
-      checkedAt,
-      models: defaultModels,
-      probe: {
-        installed: false,
-        version: null,
-        status: "warning",
-        auth: { status: "unknown" },
-        message: "GitHub Copilot is disabled in T3 Code settings.",
-      },
-    });
-  }
-
-  const probe = yield* probeCopilotSdkStatus(copilotSettings).pipe(
-    Effect.catch((cause) => {
-      if (isCommandMissingError(cause)) {
-        return Effect.succeed({
-          installed: false,
-          version: null,
-          status: "error" as const,
-          auth: { status: "unknown" } satisfies ServerProviderAuth,
-          models: BUILT_IN_MODELS,
-          message:
-            "GitHub Copilot CLI is not installed or is not on PATH. Install it or set a custom binary path.",
-        });
-      }
-
-      return Effect.fail(
-        new ServerSettingsError({
-          settingsPath: "settings.json",
-          detail: "failed to probe GitHub Copilot SDK",
-          cause,
-        }),
-      );
-    }),
-  );
-
-  return buildServerProvider({
-    provider: PROVIDER,
-    enabled: copilotSettings.enabled,
-    checkedAt,
-    models: providerModelsFromSettings(
-      probe.models,
+export const checkCopilotProviderStatus = (copilotSettings: CopilotSettings) =>
+  Effect.gen(function* () {
+    const checkedAt = DateTime.formatIso(yield* DateTime.now);
+    const defaultModels = providerModelsFromSettings(
+      BUILT_IN_MODELS,
       PROVIDER,
       copilotSettings.customModels,
       COPILOT_DEFAULT_MODEL_CAPABILITIES,
-    ),
-    probe: {
-      installed: probe.installed,
-      version: probe.version,
-      status: probe.status,
-      auth: probe.auth,
-      ...(probe.message ? { message: probe.message } : {}),
-    },
-  });
-});
-
-export const CopilotProviderLive = Layer.effect(
-  CopilotProvider,
-  Effect.gen(function* () {
-    const serverSettings = yield* ServerSettingsService;
-    const checkProvider = checkCopilotProviderStatus.pipe(
-      Effect.provideService(ServerSettingsService, serverSettings),
     );
 
-    return yield* makeManagedServerProvider<CopilotSettings>({
-      getSettings: serverSettings.getSettings.pipe(
-        Effect.map((settings) => settings.providers.copilot),
-        Effect.orDie,
+    if (!copilotSettings.enabled) {
+      return buildServerProvider({
+        driver: PROVIDER,
+        presentation: COPILOT_PRESENTATION,
+        enabled: false,
+        checkedAt,
+        models: defaultModels,
+        probe: {
+          installed: false,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: "GitHub Copilot is disabled in T3 Code settings.",
+        },
+      });
+    }
+
+    const probe = yield* probeCopilotSdkStatus(copilotSettings).pipe(
+      Effect.catch((cause) => {
+        if (isCommandMissingError(cause)) {
+          return Effect.succeed({
+            installed: false,
+            version: null,
+            status: "error" as const,
+            auth: { status: "unknown" } satisfies ServerProviderAuth,
+            models: BUILT_IN_MODELS,
+            message:
+              "GitHub Copilot CLI is not installed or is not on PATH. Install it or set a custom binary path.",
+          });
+        }
+
+        return Effect.fail(
+          new ServerSettingsError({
+            settingsPath: "settings.json",
+            detail: "failed to probe GitHub Copilot SDK",
+            cause,
+          }),
+        );
+      }),
+    );
+
+    return buildServerProvider({
+      driver: PROVIDER,
+      presentation: COPILOT_PRESENTATION,
+      enabled: copilotSettings.enabled,
+      checkedAt,
+      models: providerModelsFromSettings(
+        probe.models,
+        PROVIDER,
+        copilotSettings.customModels,
+        COPILOT_DEFAULT_MODEL_CAPABILITIES,
       ),
-      streamSettings: serverSettings.streamChanges.pipe(
-        Stream.map((settings) => settings.providers.copilot),
-      ),
-      haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
-      initialSnapshot: createInitialCopilotProviderSnapshot,
-      checkProvider,
+      probe: {
+        installed: probe.installed,
+        version: probe.version,
+        status: probe.status,
+        auth: probe.auth,
+        ...(probe.message ? { message: probe.message } : {}),
+      },
     });
-  }),
-);
+  });
