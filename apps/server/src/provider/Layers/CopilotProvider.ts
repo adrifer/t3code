@@ -93,7 +93,7 @@ export function createInitialCopilotProviderSnapshot(settings: CopilotSettings) 
       version: null,
       status: "warning",
       auth: { status: "unknown" },
-      message: "Checking GitHub Copilot SDK availability...",
+      message: "Checking GitHub Copilot CLI availability...",
     },
   });
 }

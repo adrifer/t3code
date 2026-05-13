@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off
 import {
   CopilotSettings,
   ProviderDriverKind,
@@ -11,6 +12,8 @@ import {
   type ModelInfo,
 } from "@github/copilot-sdk";
 import { createModelCapabilities, normalizeModelSlug } from "@t3tools/shared/model";
+import { accessSync, constants, existsSync } from "node:fs";
+import * as path from "node:path";
 
 import {
   resolveCommandExecution,
@@ -92,6 +95,19 @@ function resolveWindowsPathExtensions(env: NodeJS.ProcessEnv): ReadonlyArray<str
   return extensions.length > 0 ? extensions : [".exe", ".cmd", ".bat", ".com"];
 }
 
+function isExecutablePath(filePath: string): boolean {
+  if (process.platform === "win32") {
+    return existsSync(filePath);
+  }
+
+  try {
+    accessSync(filePath, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function resolveCommandOnPath(
   command: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -102,7 +118,7 @@ function resolveCommandOnPath(
   }
 
   if (trimmed.includes("/") || trimmed.includes("\\")) {
-    return trimmed;
+    return isExecutablePath(trimmed) ? trimmed : undefined;
   }
 
   const pathValue = resolvePathVariable(env);
@@ -122,12 +138,15 @@ function resolveCommandOnPath(
       ? windowsExtensions.map((extension) => `${trimmed}${extension}`)
       : [trimmed];
 
-  const delimiter = process.platform === "win32" ? ";" : ":";
-  const separator = process.platform === "win32" ? "\\" : "/";
-  for (const entry of pathValue.split(delimiter)) {
+  for (const entry of pathValue.split(path.delimiter)) {
     const normalizedEntry = entry.trim();
     if (!normalizedEntry) continue;
-    return `${normalizedEntry}${normalizedEntry.endsWith(separator) ? "" : separator}${commandCandidates[0]}`;
+    for (const commandCandidate of commandCandidates) {
+      const resolved = path.join(normalizedEntry, commandCandidate);
+      if (isExecutablePath(resolved)) {
+        return resolved;
+      }
+    }
   }
 
   return undefined;
@@ -138,8 +157,12 @@ function isDefaultCopilotBinaryPath(binaryPath: string): boolean {
   return normalized === "copilot" || normalized === "copilot.exe" || normalized === "copilot.cmd";
 }
 
-function resolveSdkCliPath(command: string, fallbackToBundledCopilot: boolean): string | undefined {
-  const resolved = resolveCommandOnPath(command);
+function resolveSdkCliPath(
+  command: string,
+  fallbackToBundledCopilot: boolean,
+  env: NodeJS.ProcessEnv | undefined,
+): string | undefined {
+  const resolved = resolveCommandOnPath(command, env);
   if (resolved) {
     return resolved;
   }
@@ -269,6 +292,7 @@ export function buildCopilotSdkClientLaunch(input: {
   const cliPath = resolveSdkCliPath(
     execution.command,
     !execution.wsl && isDefaultCopilotBinaryPath(input.settings.binaryPath),
+    execution.env,
   );
 
   return {
