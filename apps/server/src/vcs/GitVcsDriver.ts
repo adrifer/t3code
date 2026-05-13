@@ -29,6 +29,7 @@ import {
 import * as GitVcsDriverCore from "./GitVcsDriverCore.ts";
 import * as VcsDriver from "./VcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
+import { resolveWslExecutionTarget, translatePathForExecution } from "../wsl.ts";
 
 export interface ExecuteGitInput {
   readonly operation: string;
@@ -325,11 +326,12 @@ const gitCommand = (
     readonly maxOutputBytes?: number;
     readonly appendTruncationMarker?: boolean;
   },
-) =>
-  process.run({
+) => {
+  const wslTarget = resolveWslExecutionTarget({ cwd });
+  return process.run({
     operation,
     command: "git",
-    args: ["-C", cwd, ...args],
+    args: ["-C", translatePathForExecution(cwd, wslTarget), ...args],
     cwd,
     spawnCwd: globalThis.process.cwd(),
     ...(options?.stdin !== undefined ? { stdin: options.stdin } : {}),
@@ -343,6 +345,7 @@ const gitCommand = (
       ? { appendTruncationMarker: options.appendTruncationMarker }
       : {}),
   });
+};
 
 export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;

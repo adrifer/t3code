@@ -108,3 +108,51 @@ it.effect("GitVcsDriver forwards execute env to the VCS process", () => {
     ),
   );
 });
+
+it.effect("GitVcsDriver translates WSL UNC paths in git -C arguments", () => {
+  const originalPlatform = process.platform;
+  let observedArgs: ReadonlyArray<string> | undefined;
+
+  Object.defineProperty(process, "platform", {
+    configurable: true,
+    value: "win32",
+  });
+
+  return Effect.gen(function* () {
+    try {
+      const driver = yield* GitVcsDriver.makeVcsDriverShape();
+
+      yield* driver.execute({
+        operation: "GitVcsDriver.test.wslCwd",
+        cwd: String.raw`\\wsl.localhost\NixOS\home\adrifer\repo`,
+        args: ["status", "--short"],
+      });
+
+      assert.deepStrictEqual(observedArgs, ["-C", "/home/adrifer/repo", "status", "--short"]);
+    } finally {
+      Object.defineProperty(process, "platform", {
+        configurable: true,
+        value: originalPlatform,
+      });
+    }
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(VcsProcess.VcsProcess)({
+          run: (input) =>
+            Effect.sync(() => {
+              observedArgs = input.args;
+              return {
+                exitCode: ChildProcessSpawner.ExitCode(0),
+                stdout: "",
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              };
+            }),
+        }),
+      ),
+    ),
+  );
+});

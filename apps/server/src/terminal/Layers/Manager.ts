@@ -27,6 +27,7 @@ import {
   terminalSessionsTotal,
 } from "../../observability/Metrics.ts";
 import * as ProcessRunner from "../../processRunner.ts";
+import { resolveWslExecutionTarget, resolveWslTerminalShell } from "../../wsl.ts";
 import {
   TerminalCwdError,
   TerminalHistoryError,
@@ -81,6 +82,7 @@ interface TerminalSubprocessChecker {
 interface ShellCandidate {
   shell: string;
   args?: string[];
+  cwd?: string;
 }
 
 interface TerminalStartInput {
@@ -1370,7 +1372,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         options.ptyAdapter.spawn({
           shell: candidate.shell,
           ...(candidate.args ? { args: candidate.args } : {}),
-          cwd: session.cwd,
+          cwd: candidate.cwd ?? session.cwd,
           cols: session.cols,
           rows: session.rows,
           env: spawnEnv,
@@ -1429,7 +1431,10 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         increment(terminalSessionsTotal, { lifecycle: eventType }).pipe(
           Effect.andThen(
             Effect.gen(function* () {
-              const shellCandidates = resolveShellCandidates(shellResolver, platform, baseEnv);
+              const wslTarget = resolveWslExecutionTarget({ cwd: session.cwd });
+              const shellCandidates = wslTarget
+                ? [{ ...resolveWslTerminalShell(wslTarget), cwd: process.cwd() }]
+                : resolveShellCandidates(shellResolver, platform, baseEnv);
               const terminalEnv = createTerminalSpawnEnv(baseEnv, session.runtimeEnv);
               const spawnResult = yield* trySpawn(shellCandidates, terminalEnv, session);
               ptyProcess = spawnResult.process;

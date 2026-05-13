@@ -7,6 +7,7 @@ import * as Layer from "effect/Layer";
 import { TestClock } from "effect/testing";
 
 import { VcsProcessExitError, VcsProcessTimeoutError } from "@t3tools/contracts";
+import * as ProcessRunner from "../processRunner.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 
 const run = (input: VcsProcess.VcsProcessInput) =>
@@ -21,6 +22,73 @@ const provideLive = <A, E, R>(effect: Effect.Effect<A, E, R | VcsProcess.VcsProc
   effect.pipe(Effect.provide(liveLayer));
 
 describe("VcsProcess.run", () => {
+  it.effect("runs source-control CLIs inside WSL for WSL workspaces on Windows", () =>
+    Effect.gen(function* () {
+      const originalPlatform = process.platform;
+      let capturedInput: ProcessRunner.ProcessRunInput | undefined;
+      Object.defineProperty(process, "platform", {
+        configurable: true,
+        value: "win32",
+      });
+
+      try {
+        const fakeProcessRunner = ProcessRunner.ProcessRunner.of({
+          run: (input) => {
+            capturedInput = input;
+            return Effect.succeed({
+              stdout: "{}",
+              stderr: "",
+              code: 0 as ProcessRunner.ProcessRunOutput["code"],
+              timedOut: false,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            });
+          },
+        });
+        const fakeLayer = Layer.effect(VcsProcess.VcsProcess, VcsProcess.make()).pipe(
+          Layer.provide(Layer.succeed(ProcessRunner.ProcessRunner, fakeProcessRunner)),
+        );
+
+        yield* run({
+          operation: "test.wsl-cli",
+          command: "gh",
+          args: ["pr", "view", "--json", "url"],
+          cwd: String.raw`\\wsl$\Ubuntu\home\dev\repo`,
+        }).pipe(Effect.provide(fakeLayer));
+
+        const input = capturedInput;
+        expect(input).toBeDefined();
+        if (!input) return;
+
+        expect(input).toMatchObject({
+          command: "wsl.exe",
+          args: [
+            "-d",
+            "Ubuntu",
+            "--cd",
+            "/home/dev/repo",
+            "--exec",
+            "/bin/sh",
+            "-lc",
+            expect.stringContaining(".bashrc"),
+            "sh",
+            "gh",
+            "pr",
+            "view",
+            "--json",
+            "url",
+          ],
+        });
+        expect(input.cwd).toBeUndefined();
+      } finally {
+        Object.defineProperty(process, "platform", {
+          configurable: true,
+          value: originalPlatform,
+        });
+      }
+    }),
+  );
+
   it.effect("collects stdout", () =>
     Effect.gen(function* () {
       const result = yield* run({

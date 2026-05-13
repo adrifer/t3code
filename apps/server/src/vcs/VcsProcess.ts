@@ -11,6 +11,7 @@ import {
   VcsProcessTimeoutError,
 } from "@t3tools/contracts";
 import { ProcessRunner, layer as ProcessRunnerLive } from "../processRunner.ts";
+import { resolveCommandExecution } from "../wsl.ts";
 import * as Match from "effect/Match";
 
 export interface VcsProcessInput {
@@ -62,14 +63,26 @@ export const make = Effect.fn("makeVcsProcess")(function* () {
       cwd: input.cwd,
     };
 
+    const execution = resolveCommandExecution({
+      command: input.command,
+      args: input.args,
+      cwd: input.cwd,
+      env: input.env,
+      shellOnWindows: false,
+      wsl: {
+        shellProfile: true,
+      },
+    });
+
     const result = yield* processRunner
       .run({
-        command: input.command,
-        args: input.args,
-        cwd: input.cwd,
+        command: execution.command,
+        args: execution.args,
+        ...(execution.cwd !== undefined ? { cwd: execution.cwd } : {}),
         ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
-        ...(input.env !== undefined ? { env: input.env } : {}),
+        ...(execution.env !== undefined ? { env: execution.env } : {}),
+        ...(execution.shell ? { shell: execution.shell } : {}),
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: "truncate",
