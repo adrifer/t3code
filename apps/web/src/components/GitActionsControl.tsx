@@ -1692,33 +1692,12 @@ export default function GitActionsControl({
                   isBusy: isGitActionRunning,
                   hasPrimaryRemote,
                 });
-                if (item.disabled && disabledReason) {
-                  return (
-                    <Popover key={`${item.id}-${item.label}`}>
-                      <PopoverTrigger
-                        openOnHover
-                        nativeButton={false}
-                        render={<span className="block w-max cursor-not-allowed" />}
-                      >
-                        <MenuItem className="w-full" disabled>
-                          <GitActionItemIcon
-                            icon={item.icon}
-                            SourceControlIcon={SourceControlIcon}
-                          />
-                          {item.label}
-                        </MenuItem>
-                      </PopoverTrigger>
-                      <PopoverPopup tooltipStyle side="left" align="center">
-                        {disabledReason}
-                      </PopoverPopup>
-                    </Popover>
-                  );
-                }
 
                 return (
                   <MenuItem
                     key={`${item.id}-${item.label}`}
                     disabled={item.disabled}
+                    title={disabledReason ?? undefined}
                     onClick={() => {
                       openDialogForMenuItem(item);
                     }}
@@ -1728,6 +1707,12 @@ export default function GitActionsControl({
                   </MenuItem>
                 );
               })}
+              {gitActionMenuItems.length === 0 && !canPublishRepository && !gitStatusError ? (
+                <MenuItem disabled>
+                  <InfoIcon />
+                  {gitStatusForActions ? "No git actions available" : "Git status unavailable"}
+                </MenuItem>
+              ) : null}
               {canPublishRepository ? (
                 <MenuItem
                   disabled={isGitActionRunning}
