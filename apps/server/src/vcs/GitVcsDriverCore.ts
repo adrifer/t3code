@@ -28,6 +28,7 @@ import {
   parseRemoteRefWithRemoteNames,
 } from "../git/remoteRefs.ts";
 import { ServerConfig } from "../config.ts";
+import { resolveCommandExecution, translatePathForExecution } from "../wsl.ts";
 const isGitCommandError = Schema.is(GitCommandError);
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -42,6 +43,8 @@ const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const STATUS_UPSTREAM_REFRESH_ENV = Object.freeze({
+  GCM_INTERACTIVE: "Never",
+  GIT_TERMINAL_PROMPT: "0",
   SSH_ASKPASS_REQUIRE: "never",
 } satisfies NodeJS.ProcessEnv);
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
@@ -627,15 +630,33 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.mapError(toGitCommandError(commandInput, "failed to create trace2 monitor.")),
         );
+        const execution = resolveCommandExecution({
+          command: "git",
+          args: commandInput.args,
+          cwd: commandInput.cwd,
+          env: {
+            ...process.env,
+            ...input.env,
+          },
+          shellOnWindows: false,
+        });
+        const trace2Env = execution.wsl
+          ? Object.fromEntries(
+              Object.entries(trace2Monitor.env).map(([key, value]) => [
+                key,
+                value === undefined ? value : translatePathForExecution(value, execution.wsl),
+              ]),
+            )
+          : trace2Monitor.env;
         const child = yield* commandSpawner
           .spawn(
-            ChildProcess.make("git", commandInput.args, {
-              cwd: commandInput.cwd,
+            ChildProcess.make(execution.command, execution.args, {
+              ...(execution.cwd !== undefined ? { cwd: execution.cwd } : {}),
               env: {
-                ...process.env,
-                ...input.env,
-                ...trace2Monitor.env,
+                ...execution.env,
+                ...trace2Env,
               },
+              ...(execution.shell ? { shell: execution.shell } : {}),
             }),
           )
           .pipe(Effect.mapError(toGitCommandError(commandInput, "failed to spawn.")));
@@ -872,7 +893,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return executeGit(
       "GitVcsDriver.fetchRemoteForStatus",
       fetchCwd,
-      ["--git-dir", gitCommonDir, "fetch", "--quiet", "--no-tags", remoteName],
+      [
+        "-c",
+        "credential.interactive=never",
+        "--git-dir",
+        gitCommonDir,
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        remoteName,
+      ],
       {
         allowNonZeroExit: true,
         env: STATUS_UPSTREAM_REFRESH_ENV,

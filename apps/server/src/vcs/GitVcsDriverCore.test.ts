@@ -130,7 +130,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("disables SSH askpass for background upstream status fetches", () =>
+    it.effect("disables interactive prompts for background upstream status fetches", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();
         const tempDir = yield* makeTmpDir("git-vcs-driver-ssh-env-");
@@ -147,7 +147,9 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           sshWrapperPath,
           [
             "#!/bin/sh",
-            'printf "%s\\n" "${SSH_ASKPASS_REQUIRE:-}" > "$T3_TEST_SSH_ASKPASS_LOG"',
+            'printf "SSH_ASKPASS_REQUIRE=%s\\n" "${SSH_ASKPASS_REQUIRE:-}" > "$T3_TEST_SSH_ASKPASS_LOG"',
+            'printf "GIT_TERMINAL_PROMPT=%s\\n" "${GIT_TERMINAL_PROMPT:-}" >> "$T3_TEST_SSH_ASKPASS_LOG"',
+            'printf "GCM_INTERACTIVE=%s\\n" "${GCM_INTERACTIVE:-}" >> "$T3_TEST_SSH_ASKPASS_LOG"',
             "exit 1",
             "",
           ].join("\n"),
@@ -164,7 +166,10 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
 
           yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
 
-          assert.equal((yield* fileSystem.readFileString(sshLogPath)).trim(), "never");
+          assert.deepStrictEqual(
+            (yield* fileSystem.readFileString(sshLogPath)).trim().split("\n"),
+            ["SSH_ASKPASS_REQUIRE=never", "GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never"],
+          );
         }).pipe(
           Effect.ensuring(
             Effect.sync(() => {
