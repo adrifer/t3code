@@ -1,4 +1,11 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   deriveNextReleaseTag,
@@ -8,28 +15,52 @@ import {
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 
-function runGit(cwd: string, args: ReadonlyArray<string>): string {
-  return runCommand(cwd, "git", args);
-}
+class TestCommandError extends Data.TaggedError("TestCommandError")<{
+  readonly message: string;
+}> {}
 
-function runCommand(cwd: string, command: string, args: ReadonlyArray<string>): string {
-  const result = Bun.spawnSync([command, ...args], {
-    cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (!result.success) {
-    throw new Error(result.stderr.toString().trim() || `${command} ${args.join(" ")} failed`);
+const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
+  stream.pipe(
+    Stream.decodeText(),
+    Stream.runFold(
+      () => "",
+      (acc, chunk) => acc + chunk,
+    ),
+  );
+
+const runCommand = Effect.fn("runCommand")(function* (
+  cwd: string,
+  command: string,
+  args: ReadonlyArray<string>,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const child = yield* spawner.spawn(ChildProcess.make(command, args, { cwd }));
+  const [stdout, stderr, exitCode] = yield* Effect.all(
+    [collectStreamAsString(child.stdout), collectStreamAsString(child.stderr), child.exitCode],
+    { concurrency: "unbounded" },
+  );
+
+  if (exitCode !== 0) {
+    return yield* new TestCommandError({
+      message: stderr.trim() || `${command} ${args.join(" ")} failed`,
+    });
   }
-  return result.stdout.toString().trim();
-}
+  return stdout.trim();
+});
 
-async function createCommit(repoDir: string, name: string, contents: string): Promise<void> {
-  const filePath = `${repoDir}/${name}`;
-  await Bun.write(filePath, contents);
-  runGit(repoDir, ["add", name]);
-  runGit(repoDir, ["commit", "-m", `Add ${name}`]);
-}
+const runGit = (cwd: string, args: ReadonlyArray<string>) => runCommand(cwd, "git", args);
+
+const createCommit = Effect.fn("createCommit")(function* (
+  repoDir: string,
+  name: string,
+  contents: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  yield* fileSystem.writeFileString(path.join(repoDir, name), contents);
+  yield* runGit(repoDir, ["add", name]);
+  yield* runGit(repoDir, ["commit", "-m", `Add ${name}`]);
+});
 
 describe("release-next-version", () => {
   it("finds the latest stable tag and ignores prereleases", () => {
@@ -53,35 +84,45 @@ describe("release-next-version", () => {
     assert.equal(deriveNextReleaseTag(latestTag), "v0.0.1");
   });
 
-  it("creates and pushes the next stable tag from HEAD", async () => {
-    const tempRoot = runCommand(process.cwd(), "mktemp", ["-d", "-t", "t3-release-tag-XXXXXX"]);
-    const repoDir = `${tempRoot}/repo`;
-    const remoteDir = `${tempRoot}/remote.git`;
-    runCommand(tempRoot, "mkdir", [repoDir]);
+  it.layer(NodeServices.layer)("integration", (it) => {
+    it.effect(
+      "creates and pushes the next stable tag from HEAD",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const tempRoot = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "t3-release-tag-",
+          });
+          const repoDir = path.join(tempRoot, "repo");
+          const remoteDir = path.join(tempRoot, "remote.git");
+          yield* fileSystem.makeDirectory(repoDir);
 
-    try {
-      runGit(tempRoot, ["init", "--bare", remoteDir]);
-      runGit(repoDir, ["init"]);
-      runGit(repoDir, ["config", "user.name", "T3 Test"]);
-      runGit(repoDir, ["config", "user.email", "t3@example.com"]);
+          yield* runGit(tempRoot, ["init", "--bare", remoteDir]);
+          yield* runGit(repoDir, ["init"]);
+          yield* runGit(repoDir, ["config", "user.name", "T3 Test"]);
+          yield* runGit(repoDir, ["config", "user.email", "t3@example.com"]);
 
-      await createCommit(repoDir, "README.md", "# temp repo\n");
-      runGit(repoDir, ["remote", "add", "origin", remoteDir]);
-      runGit(repoDir, ["tag", "-a", "v0.0.5", "-m", "Release v0.0.5"]);
-      runGit(repoDir, ["tag", "-a", "v0.0.5-test.1", "-m", "Release v0.0.5-test.1"]);
+          yield* createCommit(repoDir, "README.md", "# temp repo\n");
+          yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+          yield* runGit(repoDir, ["tag", "-a", "v0.0.5", "-m", "Release v0.0.5"]);
+          yield* runGit(repoDir, ["tag", "-a", "v0.0.5-test.1", "-m", "Release v0.0.5-test.1"]);
 
-      const output = runCommand(repoDir, process.execPath, [
-        `${repoRoot}/scripts/release-next-version.ts`,
-      ]);
+          const output = yield* runCommand(repoDir, process.execPath, [
+            `${repoRoot}/scripts/release-next-version.ts`,
+          ]);
 
-      assert.match(output, /Latest stable release tag: v0\.0\.5/);
-      assert.match(output, /Next stable release tag: v0\.0\.6/);
-      assert.match(output, /Created annotated tag v0\.0\.6\./);
-      assert.match(output, /Pushed v0\.0\.6 to origin\./);
-      assert.equal(runGit(repoDir, ["tag", "--list", "v0.0.6"]), "v0.0.6");
-      assert.equal(runGit(remoteDir, ["tag", "--list", "v0.0.6"]), "v0.0.6");
-    } finally {
-      runCommand(process.cwd(), "rm", ["-rf", tempRoot]);
-    }
+          assert.match(output, /Latest stable release tag: v0\.0\.5/);
+          assert.match(output, /Next stable release tag: v0\.0\.6/);
+          assert.match(output, /Created annotated tag v0\.0\.6\./);
+          assert.match(output, /Pushed v0\.0\.6 to origin\./);
+          assert.equal(yield* runGit(repoDir, ["tag", "--list", "v0.0.6"]), "v0.0.6");
+          assert.equal(
+            yield* runCommand(tempRoot, "git", ["--git-dir", remoteDir, "tag", "--list", "v0.0.6"]),
+            "v0.0.6",
+          );
+        }),
+      15_000,
+    );
   });
 });

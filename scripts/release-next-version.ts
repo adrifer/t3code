@@ -1,3 +1,10 @@
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+
 const stableReleaseTagPattern = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 export interface StableReleaseTag {
@@ -11,6 +18,10 @@ interface ReleaseTagOptions {
   readonly rootDir: string | undefined;
   readonly remote: string;
 }
+
+class ReleaseTagError extends Data.TaggedError("ReleaseTagError")<{
+  readonly message: string;
+}> {}
 
 export function parseStableReleaseTag(tag: string): StableReleaseTag | null {
   const match = stableReleaseTagPattern.exec(tag);
@@ -61,19 +72,33 @@ export function deriveNextReleaseTag(latestTag: StableReleaseTag | null): string
   return `v${latestTag.major}.${latestTag.minor}.${latestTag.patch + 1}`;
 }
 
-function runGit(rootDir: string, args: ReadonlyArray<string>): string {
-  const result = Bun.spawnSync(["git", "-C", rootDir, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (!result.success) {
-    throw new Error(result.stderr.toString().trim() || `git ${args.join(" ")} failed`);
-  }
-  return result.stdout.toString().trim();
-}
+const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
+  stream.pipe(
+    Stream.decodeText(),
+    Stream.runFold(
+      () => "",
+      (acc, chunk) => acc + chunk,
+    ),
+  );
 
-export function listGitTags(rootDir: string): ReadonlyArray<string> {
-  const output = runGit(rootDir, ["tag", "--list"]);
+const runGit = Effect.fn("runGit")(function* (rootDir: string, args: ReadonlyArray<string>) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const child = yield* spawner.spawn(ChildProcess.make("git", ["-C", rootDir, ...args]));
+  const [stdout, stderr, exitCode] = yield* Effect.all(
+    [collectStreamAsString(child.stdout), collectStreamAsString(child.stderr), child.exitCode],
+    { concurrency: "unbounded" },
+  );
+
+  if (exitCode !== 0) {
+    return yield* new ReleaseTagError({
+      message: stderr.trim() || `git ${args.join(" ")} failed`,
+    });
+  }
+  return stdout.trim();
+});
+
+export const listGitTags = Effect.fn("listGitTags")(function* (rootDir: string) {
+  const output = yield* runGit(rootDir, ["tag", "--list"]);
   if (!output) {
     return [];
   }
@@ -82,23 +107,30 @@ export function listGitTags(rootDir: string): ReadonlyArray<string> {
     .split("\n")
     .map((tag) => tag.trim())
     .filter((tag) => tag.length > 0);
-}
+});
 
-export function getHeadCommit(rootDir: string): string {
-  return runGit(rootDir, ["rev-parse", "--verify", "HEAD"]);
-}
+export const getHeadCommit = Effect.fn("getHeadCommit")((rootDir: string) =>
+  runGit(rootDir, ["rev-parse", "--verify", "HEAD"]),
+);
 
-export function fetchGitTags(rootDir: string, remote: string): void {
-  runGit(rootDir, ["fetch", remote, "--tags"]);
-}
+export const fetchGitTags = Effect.fn("fetchGitTags")(function* (rootDir: string, remote: string) {
+  yield* runGit(rootDir, ["fetch", remote, "--tags"]);
+});
 
-export function createAnnotatedReleaseTag(rootDir: string, tag: string): void {
-  runGit(rootDir, ["tag", "-a", tag, "-m", `Release ${tag}`]);
-}
+export const createAnnotatedReleaseTag = Effect.fn("createAnnotatedReleaseTag")(function* (
+  rootDir: string,
+  tag: string,
+) {
+  yield* runGit(rootDir, ["tag", "-a", tag, "-m", `Release ${tag}`]);
+});
 
-export function pushReleaseTag(rootDir: string, remote: string, tag: string): void {
-  runGit(rootDir, ["push", remote, `refs/tags/${tag}`]);
-}
+export const pushReleaseTag = Effect.fn("pushReleaseTag")(function* (
+  rootDir: string,
+  remote: string,
+  tag: string,
+) {
+  yield* runGit(rootDir, ["push", remote, `refs/tags/${tag}`]);
+});
 
 function parseArgs(argv: ReadonlyArray<string>): ReleaseTagOptions {
   let rootDir: string | undefined;
@@ -139,39 +171,39 @@ function parseArgs(argv: ReadonlyArray<string>): ReleaseTagOptions {
   };
 }
 
-export function resolveNextReleaseTag(options: ReleaseTagOptions): {
-  readonly latestTag: StableReleaseTag | null;
-  readonly nextTag: string;
-  readonly headCommit: string;
-} {
+export const resolveNextReleaseTag = Effect.fn("resolveNextReleaseTag")(function* (
+  options: ReleaseTagOptions,
+) {
   const rootDir = options.rootDir ?? process.cwd();
 
-  fetchGitTags(rootDir, options.remote);
+  yield* fetchGitTags(rootDir, options.remote);
 
-  const latestTag = findLatestStableReleaseTag(listGitTags(rootDir));
+  const latestTag = findLatestStableReleaseTag(yield* listGitTags(rootDir));
   const nextTag = deriveNextReleaseTag(latestTag);
-  const headCommit = getHeadCommit(rootDir);
+  const headCommit = yield* getHeadCommit(rootDir);
 
   return {
     latestTag,
     nextTag,
     headCommit,
   };
-}
+});
 
 const isMain =
   process.argv[1] !== undefined && process.argv[1] === new URL(import.meta.url).pathname;
 
 if (isMain) {
-  const options = parseArgs(process.argv.slice(2));
-  const rootDir = options.rootDir ?? process.cwd();
-  const { latestTag, nextTag, headCommit } = resolveNextReleaseTag(options);
+  Effect.gen(function* () {
+    const options = parseArgs(process.argv.slice(2));
+    const rootDir = options.rootDir ?? process.cwd();
+    const { latestTag, nextTag, headCommit } = yield* resolveNextReleaseTag(options);
 
-  process.stdout.write(`Latest stable release tag: ${latestTag?.tag ?? "none"}\n`);
-  process.stdout.write(`Next stable release tag: ${nextTag}\n`);
-  process.stdout.write(`Current HEAD commit: ${headCommit}\n`);
-  createAnnotatedReleaseTag(rootDir, nextTag);
-  process.stdout.write(`Created annotated tag ${nextTag}.\n`);
-  pushReleaseTag(rootDir, options.remote, nextTag);
-  process.stdout.write(`Pushed ${nextTag} to ${options.remote}.\n`);
+    process.stdout.write(`Latest stable release tag: ${latestTag?.tag ?? "none"}\n`);
+    process.stdout.write(`Next stable release tag: ${nextTag}\n`);
+    process.stdout.write(`Current HEAD commit: ${headCommit}\n`);
+    yield* createAnnotatedReleaseTag(rootDir, nextTag);
+    process.stdout.write(`Created annotated tag ${nextTag}.\n`);
+    yield* pushReleaseTag(rootDir, options.remote, nextTag);
+    process.stdout.write(`Pushed ${nextTag} to ${options.remote}.\n`);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), NodeRuntime.runMain);
 }
