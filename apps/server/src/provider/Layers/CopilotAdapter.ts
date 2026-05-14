@@ -2019,14 +2019,6 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       const context = yield* ensureOpenContext(input.threadId);
       yield* validateModelSelection(input.modelSelection, "sendTurn");
 
-      if (context.activeTurn) {
-        return yield* new ProviderAdapterValidationError({
-          provider: PROVIDER,
-          operation: "sendTurn",
-          issue: `Thread '${input.threadId}' already has an active turn.`,
-        });
-      }
-
       const modelSelection: ModelSelection = input.modelSelection ?? {
         instanceId,
         model: context.session.model ?? DEFAULT_MODEL_BY_PROVIDER[PROVIDER] ?? "gpt-5.4",
@@ -2046,6 +2038,41 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       });
       const sdkAttachments =
         attachments.length > 0 ? yield* buildSdkAttachments(attachments) : undefined;
+
+      if (context.activeTurn) {
+        if (context.session.model && modelSelection.model !== context.session.model) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "sendTurn",
+            issue: `Thread '${input.threadId}' already has an active turn. Wait for it to finish before switching models.`,
+          });
+        }
+
+        yield* Effect.tryPromise({
+          try: () =>
+            context.sdkSession.send({
+              prompt,
+              ...(sdkAttachments ? { attachments: sdkAttachments } : {}),
+              mode: "immediate",
+            }),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "session/send",
+              detail: toMessage(cause, "Failed to steer active Copilot turn."),
+              cause,
+            }),
+        });
+
+        return {
+          threadId: input.threadId,
+          turnId: context.activeTurn.turnId,
+          ...(context.session.resumeCursor !== undefined
+            ? { resumeCursor: context.session.resumeCursor }
+            : {}),
+        };
+      }
+
       const desiredMode = mapInteractionModeToSessionMode(interactionMode);
       if (context.currentMode !== desiredMode) {
         yield* Effect.tryPromise({
