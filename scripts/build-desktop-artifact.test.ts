@@ -429,6 +429,36 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
+  it.effect("only unpacks WSL runtime dependencies for Windows artifacts", () =>
+    Effect.gen(function* () {
+      const macConfig = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      const winConfig = yield* createBuildConfig(
+        "win",
+        "nsis",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
+      assert.deepStrictEqual(macConfig.asarUnpack, ["node_modules/@ff-labs/fff-bin-*/**/*"]);
+      assert.deepStrictEqual(winConfig.asarUnpack, [
+        "node_modules/@ff-labs/fff-bin-*/**/*",
+        "apps/server/dist/**",
+        "**/node_modules/**",
+      ]);
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
   it("promotes target fff binaries to direct staged dependencies", () => {
     assert.deepStrictEqual(resolveFffNativeDependencies("mac", "arm64", "0.9.4"), {
       "@ff-labs/fff-bin-darwin-arm64": "0.9.4",
