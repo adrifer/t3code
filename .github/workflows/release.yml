@@ -404,6 +404,11 @@ jobs:
   # Upstream publishes the CLI package to npm as part of the release flow.
   # This fork intentionally skips npm publication, so the job only runs for
   # `pingdotgg` and stays here mainly to document the upstream behavior.
+  # Upstream relay tracing config is also passed via an artifact instead of a
+  # masked cross-job token output:
+  #   node infra/relay/scripts/deploy.ts --github-env-file "$RUNNER_TEMP/relay-client-tracing.env"
+  #   name: relay-client-tracing-config
+  #   cat "$config_path" >> "$GITHUB_ENV"
   publish_cli:
     name: Publish CLI to npm
     needs: [preflight, build]
