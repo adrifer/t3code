@@ -1,9 +1,8 @@
-import type { PtyExitEvent } from "../terminal/Services/PTY.ts";
+import type { PtyExitEvent } from "../terminal/PtyAdapter.ts";
 import type { CopilotSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
-import { PtyAdapter } from "../terminal/Services/PTY.ts";
-import { resolveCommandExecution } from "../wsl.ts";
+import { PtyAdapter } from "../terminal/PtyAdapter.ts";
 
 export interface CopilotModelCatalogEntry {
   readonly slug: string;
@@ -11,10 +10,7 @@ export interface CopilotModelCatalogEntry {
   readonly premiumRequestMultiplier?: string;
 }
 
-export type CopilotModelCatalogProbeSettings = Pick<
-  CopilotSettings,
-  "binaryPath" | "useWsl" | "wslDistro"
->;
+export type CopilotModelCatalogProbeSettings = Pick<CopilotSettings, "binaryPath">;
 
 export const FALLBACK_COPILOT_MODEL_CATALOG: ReadonlyArray<CopilotModelCatalogEntry> = [
   { slug: "gpt-5.4", name: "GPT-5.4", premiumRequestMultiplier: "1x" },
@@ -195,26 +191,14 @@ export const probeCopilotModelCatalog = Effect.fn("probeCopilotModelCatalog")(fu
   settings: CopilotModelCatalogProbeSettings,
 ) {
   const pty = yield* PtyAdapter;
-  const execution = resolveCommandExecution({
-    command: settings.binaryPath,
-    args: ["--no-color", "--screen-reader", "--no-custom-instructions", "-i", "/model"],
-    wsl: {
-      enabled: settings.useWsl,
-      distro: settings.wslDistro,
-      shellProfile: true,
-    },
-  });
 
   const spawned = yield* pty.spawn({
-    shell: execution.command,
-    args: [...execution.args],
-    cwd: execution.cwd ?? globalThis.process.cwd(),
+    shell: settings.binaryPath,
+    args: ["--no-color", "--screen-reader", "--no-custom-instructions", "-i", "/model"],
+    cwd: globalThis.process.cwd(),
     cols: 160,
     rows: 48,
-    env: {
-      ...globalThis.process.env,
-      ...execution.env,
-    },
+    env: globalThis.process.env,
   });
 
   return yield* Effect.promise<ReadonlyArray<CopilotModelCatalogEntry>>(

@@ -12,15 +12,8 @@ import {
   type ModelInfo,
 } from "@github/copilot-sdk";
 import { createModelCapabilities, normalizeModelSlug } from "@t3tools/shared/model";
-import { accessSync, constants, existsSync } from "node:fs";
-import * as path from "node:path";
-
-import {
-  resolveCommandExecution,
-  resolveWslExecutionTarget,
-  translatePathForExecution,
-  type WslExecutionTarget,
-} from "../wsl.ts";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 const COPILOT_REASONING_LEVELS = [
   { id: "xhigh", label: "Extra High" },
@@ -96,12 +89,8 @@ function resolveWindowsPathExtensions(env: NodeJS.ProcessEnv): ReadonlyArray<str
 }
 
 function isExecutablePath(filePath: string): boolean {
-  if (process.platform === "win32") {
-    return existsSync(filePath);
-  }
-
   try {
-    accessSync(filePath, constants.X_OK);
+    NodeFS.accessSync(filePath, NodeFS.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -127,22 +116,22 @@ function resolveCommandOnPath(
   }
 
   const windowsExtensions =
-    process.platform === "win32"
+    typeof env.PATHEXT === "string" && env.PATHEXT.trim().length > 0
       ? resolveWindowsPathExtensions(env)
       : ([] as ReadonlyArray<string>);
-  const hasKnownWindowsExtension =
-    process.platform === "win32" &&
-    windowsExtensions.some((extension) => trimmed.toLowerCase().endsWith(extension));
+  const hasKnownWindowsExtension = windowsExtensions.some((extension) =>
+    trimmed.toLowerCase().endsWith(extension),
+  );
   const commandCandidates =
-    process.platform === "win32" && !hasKnownWindowsExtension
+    windowsExtensions.length > 0 && !hasKnownWindowsExtension
       ? windowsExtensions.map((extension) => `${trimmed}${extension}`)
       : [trimmed];
 
-  for (const entry of pathValue.split(path.delimiter)) {
+  for (const entry of pathValue.split(NodePath.delimiter)) {
     const normalizedEntry = entry.trim();
     if (!normalizedEntry) continue;
     for (const commandCandidate of commandCandidates) {
-      const resolved = path.join(normalizedEntry, commandCandidate);
+      const resolved = NodePath.join(normalizedEntry, commandCandidate);
       if (isExecutablePath(resolved)) {
         return resolved;
       }
@@ -258,63 +247,26 @@ export function formatPremiumRequestMultiplier(
   return `${Number.isInteger(rounded) ? rounded.toFixed(0) : String(rounded)}x`;
 }
 
-export function translateCopilotWorkingDirectory(
-  cwd: string | undefined,
-  executionTarget: WslExecutionTarget | null,
-): string | undefined {
-  if (!cwd) {
-    return undefined;
-  }
-  return translatePathForExecution(cwd, executionTarget);
-}
-
 export function buildCopilotSdkClientLaunch(input: {
   readonly settings: CopilotSettings;
   readonly cwd?: string | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
 }): {
   readonly clientOptions: CopilotClientOptions;
-  readonly executionTarget: WslExecutionTarget | null;
 } {
-  const execution = resolveCommandExecution({
-    command: input.settings.binaryPath,
-    args: [],
-    cwd: input.cwd,
-    env: input.env,
-    shellOnWindows: false,
-    wsl: {
-      enabled: input.settings.useWsl,
-      distro: input.settings.wslDistro,
-      shellProfile: true,
-    },
-  });
-
   const cliPath = resolveSdkCliPath(
-    execution.command,
-    !execution.wsl && isDefaultCopilotBinaryPath(input.settings.binaryPath),
-    execution.env,
+    input.settings.binaryPath,
+    isDefaultCopilotBinaryPath(input.settings.binaryPath),
+    input.env,
   );
 
   return {
     clientOptions: {
       ...(cliPath ? { cliPath } : {}),
-      ...(execution.args.length > 0 ? { cliArgs: [...execution.args] } : {}),
-      ...(execution.cwd ? { cwd: execution.cwd } : {}),
-      ...(execution.env ? { env: execution.env } : {}),
+      ...(input.cwd ? { cwd: input.cwd } : {}),
+      ...(input.env ? { env: input.env } : {}),
     },
-    executionTarget: execution.wsl,
   };
-}
-
-export function resolveCopilotExecutionTarget(
-  settings: Pick<CopilotSettings, "useWsl" | "wslDistro">,
-  cwd?: string | undefined,
-): WslExecutionTarget | null {
-  return resolveWslExecutionTarget({
-    cwd,
-    enabled: settings.useWsl,
-    distro: settings.wslDistro,
-  });
 }
 
 function authTypeLabel(authType: GetAuthStatusResponse["authType"]): string | undefined {

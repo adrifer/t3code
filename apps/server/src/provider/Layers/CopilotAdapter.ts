@@ -44,11 +44,12 @@ import {
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
-import { buildCopilotSdkClientLaunch, translateCopilotWorkingDirectory } from "../copilotSdk.ts";
+import { buildCopilotSdkClientLaunch } from "../copilotSdk.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = ProviderDriverKind.make("copilot");
 const IMAGE_PATH_REGEX = /\.(avif|bmp|gif|heic|ico|jpe?g|png|svg|webp)$/i;
+let idCounter = 0;
 
 type CopilotSessionMode = "interactive" | "plan" | "autopilot";
 type CopilotReasoningEffort = NonNullable<SessionConfig["reasoningEffort"]>;
@@ -217,15 +218,18 @@ function nowIso(): string {
 }
 
 function nextEventId() {
-  return EventId.make(crypto.randomUUID());
+  idCounter += 1;
+  return EventId.make(`copilot-event-${idCounter}`);
 }
 
 function nextTurnId() {
-  return TurnId.make(crypto.randomUUID());
+  idCounter += 1;
+  return TurnId.make(`copilot-turn-${idCounter}`);
 }
 
 function nextItemId() {
-  return RuntimeItemId.make(crypto.randomUUID());
+  idCounter += 1;
+  return RuntimeItemId.make(`copilot-item-${idCounter}`);
 }
 
 function toMessage(cause: unknown, fallback: string): string {
@@ -1865,7 +1869,6 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
 
       const providerSessionId = readCopilotResumeCursor(input.resumeCursor);
       let contextRef: CopilotSessionContext | undefined;
-      const workingDirectory = translateCopilotWorkingDirectory(input.cwd, launch.executionTarget);
       const sessionConfig: SessionConfig = {
         model: resolveApiModelId(modelSelection, PROVIDER),
         streaming: true,
@@ -1882,7 +1885,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
           }
           return awaitUserInputResponse(contextRef, request);
         },
-        ...(workingDirectory ? { workingDirectory } : {}),
+        ...(input.cwd ? { workingDirectory: input.cwd } : {}),
         includeSubAgentStreamingEvents: true,
       };
 
@@ -1916,7 +1919,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
             detail: toMessage(cause, "Failed to load Copilot session history."),
             cause,
           }),
-      }).pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<SessionEvent>)));
+      }).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<SessionEvent>));
       const rebuilt = rebuildTurnsFromHistory(history);
       const createdAt = nowIso();
       const session: ProviderSession = {

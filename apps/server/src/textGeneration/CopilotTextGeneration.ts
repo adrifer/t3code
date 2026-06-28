@@ -15,11 +15,6 @@ import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shar
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
-import {
-  resolveCommandExecution,
-  resolveWslExecutionTarget,
-  translatePathForExecution,
-} from "../wsl.ts";
 import { type TextGenerationShape } from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
@@ -43,6 +38,7 @@ type CopilotJsonLine = {
 };
 
 const COPILOT_DRIVER_KIND = ProviderDriverKind.make("copilot");
+const decodeCopilotJsonLine = Schema.decodeUnknownSync(Schema.UnknownFromJsonString);
 
 export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(function* (
   copilotSettings: CopilotSettings,
@@ -68,7 +64,6 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
 
   const materializeImageAttachmentPaths = (
     attachments: ReadonlyArray<ChatAttachment> | undefined,
-    executionTarget: ReturnType<typeof resolveWslExecutionTarget>,
   ) => {
     if (!attachments || attachments.length === 0) {
       return [] as string[];
@@ -83,21 +78,15 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
       if (!resolvedPath) {
         continue;
       }
-      imagePaths.push(translatePathForExecution(resolvedPath, executionTarget));
+      imagePaths.push(resolvedPath);
     }
     return imagePaths;
   };
 
-  const resolveImagePathsForCwd = (
-    cwd: string,
+  const resolveImagePaths = (
     attachments: ReadonlyArray<ChatAttachment> | undefined,
   ): ReadonlyArray<string> => {
-    const executionTarget = resolveWslExecutionTarget({
-      cwd,
-      enabled: copilotSettings.useWsl,
-      distro: copilotSettings.wslDistro,
-    });
-    return materializeImageAttachmentPaths(attachments, executionTarget);
+    return materializeImageAttachmentPaths(attachments);
   };
 
   const buildStructuredPrompt = (
@@ -134,8 +123,7 @@ ${schemaJson}
           .split(/\r?\n/)
           .map((line) => line.trim())
           .filter((line) => line.length > 0);
-        const decodeJsonLine = Schema.decodeUnknownSync(Schema.UnknownFromJsonString);
-        const events = lines.map((line) => decodeJsonLine(line) as CopilotJsonLine);
+        const events = lines.map((line) => decodeCopilotJsonLine(line) as CopilotJsonLine);
         const assistantMessage = [...events]
           .toReversed()
           .find(
@@ -182,31 +170,21 @@ ${schemaJson}
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const structuredPrompt = buildStructuredPrompt(prompt, outputSchemaJson, imagePaths);
     const reasoningEffort = getModelSelectionReasoningEffort(modelSelection);
-    const execution = resolveCommandExecution({
-      command: copilotSettings.binaryPath || "copilot",
-      args: [
-        "-s",
-        "--output-format",
-        "json",
-        "--allow-all-tools",
-        "--allow-all-paths",
-        "--model",
-        resolveApiModelId(modelSelection, COPILOT_DRIVER_KIND),
-        ...(reasoningEffort ? ["--effort", reasoningEffort] : []),
-        "-p",
-        structuredPrompt,
-      ],
+    const commandArgs = [
+      "-s",
+      "--output-format",
+      "json",
+      "--allow-all-tools",
+      "--allow-all-paths",
+      "--model",
+      resolveApiModelId(modelSelection, COPILOT_DRIVER_KIND),
+      ...(reasoningEffort ? ["--effort", reasoningEffort] : []),
+      "-p",
+      structuredPrompt,
+    ];
+    const command = ChildProcess.make(copilotSettings.binaryPath || "copilot", commandArgs, {
       cwd,
       env: environment,
-      wsl: {
-        enabled: copilotSettings.useWsl,
-        distro: copilotSettings.wslDistro,
-        shellProfile: true,
-      },
-    });
-    const command = ChildProcess.make(execution.command, [...execution.args], {
-      ...(execution.cwd ? { cwd: execution.cwd } : {}),
-      shell: execution.shell,
     });
 
     const child = yield* commandSpawner
@@ -361,7 +339,7 @@ ${schemaJson}
   const generateBranchName: TextGenerationShape["generateBranchName"] = Effect.fn(
     "CopilotTextGeneration.generateBranchName",
   )(function* (input) {
-    const imagePaths = resolveImagePathsForCwd(input.cwd, input.attachments);
+    const imagePaths = resolveImagePaths(input.attachments);
     const { prompt, outputSchema } = buildBranchNamePrompt({
       message: input.message,
       attachments: input.attachments,
@@ -391,7 +369,7 @@ ${schemaJson}
   const generateThreadTitle: TextGenerationShape["generateThreadTitle"] = Effect.fn(
     "CopilotTextGeneration.generateThreadTitle",
   )(function* (input) {
-    const imagePaths = resolveImagePathsForCwd(input.cwd, input.attachments);
+    const imagePaths = resolveImagePaths(input.attachments);
     const { prompt, outputSchema } = buildThreadTitlePrompt({
       message: input.message,
       attachments: input.attachments,

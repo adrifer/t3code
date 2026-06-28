@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind } from "@t3tools/contracts";
 
 import { DRIVER_OPTION_BY_VALUE } from "./providerDriverMeta";
@@ -27,8 +27,6 @@ describe("ProviderSettingsForm helpers", () => {
     expect(copilot?.label).toBe("GitHub Copilot");
     expect(deriveProviderSettingsFields(copilot!).map((field) => field.key)).toEqual([
       "binaryPath",
-      "useWsl",
-      "wslDistro",
     ]);
   });
 

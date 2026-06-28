@@ -286,7 +286,7 @@ export const checkCopilotProviderStatus = (copilotSettings: CopilotSettings) =>
         return Effect.fail(
           new ServerSettingsError({
             settingsPath: "settings.json",
-            detail: "failed to probe GitHub Copilot SDK",
+            operation: "normalize",
             cause,
           }),
         );

@@ -1,5 +1,6 @@
 import {
   type ProviderDriverKind,
+  type ProviderInstanceId,
   type ProviderOptionSelection,
   type ScopedThreadRef,
   type ServerProviderModel,
@@ -20,9 +21,11 @@ export type ComposerProviderStateInput = {
   provider: ProviderDriverKind;
   model: string;
   models: ReadonlyArray<ServerProviderModel>;
-  prompt: string;
+  promptInjectionState?: ComposerPromptInjectionState;
   modelOptions: ReadonlyArray<ProviderOptionSelection> | null | undefined;
 };
+
+export type ComposerPromptInjectionState = "none" | "ultrathink";
 
 export type ComposerProviderState = {
   provider: ProviderDriverKind;
@@ -35,6 +38,7 @@ export type ComposerProviderState = {
 
 type TraitsRenderInput = {
   provider: ProviderDriverKind;
+  instanceId?: ProviderInstanceId;
   threadRef?: ScopedThreadRef;
   draftId?: DraftId;
   model: string;
@@ -44,8 +48,12 @@ type TraitsRenderInput = {
   onPromptChange: (prompt: string) => void;
 };
 
+export function getComposerPromptInjectionState(prompt: string): ComposerPromptInjectionState {
+  return isClaudeUltrathinkPrompt(prompt) ? "ultrathink" : "none";
+}
+
 export function getComposerProviderState(input: ComposerProviderStateInput): ComposerProviderState {
-  const { provider, model, models, prompt, modelOptions } = input;
+  const { provider, model, models, modelOptions, promptInjectionState = "none" } = input;
   const caps = getProviderModelCapabilities(models, model, provider);
   const descriptors = getProviderOptionDescriptors({ caps, selections: modelOptions });
   const primarySelectDescriptor = descriptors.find(
@@ -56,7 +64,7 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
   const promptEffort = typeof primaryValue === "string" ? primaryValue : null;
   const ultrathinkActive =
     (primarySelectDescriptor?.promptInjectedValues?.length ?? 0) > 0 &&
-    isClaudeUltrathinkPrompt(prompt);
+    promptInjectionState === "ultrathink";
 
   return {
     provider,
@@ -65,7 +73,7 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
     ...(ultrathinkActive
       ? {
           composerFrameClassName: "ultrathink-frame",
-          composerSurfaceClassName: "shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset]",
+          composerSurfaceClassName: "shadow-[0_0_0_1px_rgba(255,255,255,0.07)_inset]",
           modelPickerIconClassName: "ultrathink-chroma",
         }
       : {}),
@@ -76,8 +84,17 @@ function renderTraitsControl(
   Component: typeof TraitsMenuContent | typeof TraitsPicker,
   input: TraitsRenderInput,
 ): ReactNode {
-  const { provider, threadRef, draftId, model, models, modelOptions, prompt, onPromptChange } =
-    input;
+  const {
+    provider,
+    instanceId,
+    threadRef,
+    draftId,
+    model,
+    models,
+    modelOptions,
+    prompt,
+    onPromptChange,
+  } = input;
   const hasTarget = threadRef !== undefined || draftId !== undefined;
   if (
     !hasTarget ||
@@ -88,6 +105,7 @@ function renderTraitsControl(
   return (
     <Component
       provider={provider}
+      {...(instanceId ? { instanceId } : {})}
       models={models}
       {...(threadRef ? { threadRef } : {})}
       {...(draftId ? { draftId } : {})}
