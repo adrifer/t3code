@@ -158,10 +158,56 @@ jobs:
             --current-tag "${{ steps.release_meta.outputs.tag }}" \
             --github-output
 
+  # node-pty publishes no Linux prebuilt and the WSL backend runs under the
+  # distro's own Linux Node, which can't load the Windows/Electron binary. Build
+  # the Linux pty.node on Linux and hand it to the Windows packaging job so the
+  # released installer ships a ready WSL backend.
+  build_wsl_node_pty:
+    name: Build WSL node-pty (linux-x64)
+    needs: [preflight]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    runs-on: ${{ github.repository_owner == 'pingdotgg' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Build node-pty linux-x64 prebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          pty_pkg="$(node -e "console.log(require.resolve('node-pty/package.json', { paths: ['$GITHUB_WORKSPACE/apps/server'] }))")"
+          pty_dir="$(dirname "$pty_pkg")"
+          ( cd "$pty_dir" && npx --yes node-gyp rebuild )
+          mkdir -p wsl-prebuild
+          cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
+          file wsl-prebuild/pty.node
+
+      - name: Upload node-pty linux-x64 prebuild
+        uses: actions/upload-artifact@v7
+        with:
+          name: wsl-node-pty-x64
+          path: wsl-prebuild/pty.node
+          if-no-files-found: error
+
   build:
     name: Build ${{ matrix.label }}
-    needs: preflight
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    # Keep the WSL prebuild in `needs` so the Windows build can download it.
+    # Non-Windows platforms can still run if the prebuild job fails; the Windows
+    # download step then fails that platform explicitly instead of hiding the
+    # missing WSL support inside a successful installer.
+    needs: [preflight, build_wsl_node_pty]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ${{ github.repository_owner == 'pingdotgg' && matrix.runner || matrix.github_runner }}
     timeout-minutes: 30
     strategy:
@@ -219,6 +265,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes imagemagick
+
+      - name: Download WSL node-pty prebuild
+        if: matrix.platform == 'win'
+        uses: actions/download-artifact@v7
+        with:
+          name: wsl-node-pty-x64
+          path: wsl-prebuild
 
       - name: Install Spectre-mitigated MSVC libs
         if: matrix.platform == 'win'
@@ -347,6 +400,7 @@ jobs:
               echo "macOS signing disabled (missing one or more Apple signing secrets)."
             fi
           elif [[ "${{ matrix.platform }}" == "win" ]]; then
+            args+=(--wsl-prebuild "$GITHUB_WORKSPACE/wsl-prebuild/pty.node")
             if has_all \
               "$AZURE_TENANT_ID" \
               "$AZURE_CLIENT_ID" \
