@@ -85,6 +85,7 @@ export interface DesktopBackendStartConfig {
   readonly bootstrap: DesktopBackendBootstrapValue;
   readonly bootstrapDelivery: DesktopBackendBootstrapDelivery;
   readonly httpBaseUrl: URL;
+  readonly readinessTimeout?: Duration.Duration;
   readonly captureOutput: boolean;
   readonly preflightFailure: Option.Option<PreflightFailure>;
   // Present for a WSL run after the configured/default distro has been
@@ -368,14 +369,21 @@ const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     yield* drainBackendOutput("stdout", handle.stdout, onOutput).pipe(Effect.forkScoped);
     yield* drainBackendOutput("stderr", handle.stderr, onOutput).pipe(Effect.forkScoped);
   }
-  yield* waitForHttpReady(
-    options.httpBaseUrl,
-    options.readinessTimeout ?? DEFAULT_BACKEND_READINESS_TIMEOUT,
-  ).pipe(
-    Effect.tap(() => options.onReady?.() ?? Effect.void),
-    Effect.catch((error) => options.onReadinessFailure?.(error) ?? Effect.void),
-    Effect.forkScoped,
-  );
+  const readinessTimeout = options.readinessTimeout ?? DEFAULT_BACKEND_READINESS_TIMEOUT;
+  yield* Effect.gen(function* () {
+    for (;;) {
+      const ready = yield* waitForHttpReady(options.httpBaseUrl, readinessTimeout).pipe(
+        Effect.as(true),
+        Effect.catch((error) =>
+          (options.onReadinessFailure?.(error) ?? Effect.void).pipe(Effect.as(false)),
+        ),
+      );
+      if (ready) {
+        yield* options.onReady?.() ?? Effect.void;
+        return;
+      }
+    }
+  }).pipe(Effect.forkScoped);
 
   return describeProcessExit(yield* Effect.result(handle.exitCode));
 });
@@ -663,7 +671,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
             yield* spec.onReady?.(config.value.httpBaseUrl) ?? Effect.void;
           }),
           onReadinessFailure: (error) =>
-            logInstanceWarning("backend readiness check failed during bootstrap", {
+            logInstanceWarning("backend readiness check timed out; continuing to wait", {
               error: error.message,
             }),
           onOutput: (streamName, chunk) => backendOutputLog.writeOutputChunk(streamName, chunk),

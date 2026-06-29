@@ -279,6 +279,56 @@ describe("DesktopBackendManager", () => {
     ),
   );
 
+  it.effect("keeps probing after the readiness timeout while the backend process runs", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let requestCount = 0;
+        let readyCount = 0;
+        const ready = yield* Deferred.make<void>();
+        const exited = yield* Queue.unbounded<void>();
+
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.succeed(
+              makeProcess({
+                exitCode: Deferred.await(ready).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+              }),
+            ),
+          ),
+        );
+
+        const instance = yield* makeTestInstance({
+          config: {
+            ...baseConfig,
+            readinessTimeout: Duration.millis(150),
+          },
+          spawnerLayer,
+          httpClientLayer: httpClientLayer((request) =>
+            Effect.sync(() => {
+              requestCount += 1;
+              return responseForRequest(request, requestCount >= 3 ? 200 : 503);
+            }),
+          ),
+          onReady: Effect.sync(() => {
+            readyCount += 1;
+          }).pipe(Effect.andThen(Deferred.succeed(ready, void 0)), Effect.asVoid),
+          backendOutputLog: {
+            writeSessionBoundary: ({ phase }) =>
+              phase === "END" ? Queue.offer(exited, void 0).pipe(Effect.asVoid) : Effect.void,
+          },
+        });
+
+        yield* instance.start;
+        yield* TestClock.adjust(Duration.seconds(1));
+        yield* Queue.take(exited);
+
+        assert.equal(readyCount, 1);
+        assert.isAtLeast(requestCount, 3);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
   it.effect("starts the configured backend and closes the scoped process on stop", () =>
     Effect.scoped(
       Effect.gen(function* () {

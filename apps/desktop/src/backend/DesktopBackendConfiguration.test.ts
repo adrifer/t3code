@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -468,6 +469,8 @@ describe("DesktopBackendConfiguration", () => {
           // not localhost — the renderer reaches the backend directly to
           // avoid relying on wslhost forwarding.
           assert.equal(config.httpBaseUrl.href, "http://172.27.0.99:5050/");
+          assert.isDefined(config.readinessTimeout);
+          assert.equal(Duration.toMillis(config.readinessTimeout), 300_000);
           assert.equal(config.env.OPENAI_API_KEY, "openai-key");
           assert.equal(config.env.ANTHROPIC_API_KEY, "anthropic-key");
           // The existing WSLENV is preserved byte-for-byte (note the empty

@@ -3,6 +3,7 @@ import * as NodeOS from "node:os";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
@@ -72,6 +73,8 @@ const emptyBackendObservabilitySettings: BackendObservabilitySettings = {
   otlpTracesUrl: Option.none(),
   otlpMetricsUrl: Option.none(),
 };
+
+const WSL_BACKEND_READINESS_TIMEOUT = Duration.minutes(5);
 
 const DESKTOP_BACKEND_ENV_NAMES = [
   "T3CODE_PORT",
@@ -498,6 +501,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     bootstrap,
     bootstrapDelivery: "stdin" as const,
     httpBaseUrl,
+    readinessTimeout: WSL_BACKEND_READINESS_TIMEOUT,
     captureOutput: true,
     ...(runningDistro !== null ? { runningDistro } : {}),
   };
