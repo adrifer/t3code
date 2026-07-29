@@ -14,6 +14,7 @@ import {
 } from "@github/copilot-sdk";
 import { createModelCapabilities, normalizeModelSlug } from "@t3tools/shared/model";
 import * as NodeFS from "node:fs";
+import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
 
 const COPILOT_REASONING_LEVELS = [
@@ -147,12 +148,44 @@ function isDefaultCopilotBinaryPath(binaryPath: string): boolean {
   return normalized === "copilot" || normalized === "copilot.exe" || normalized === "copilot.cmd";
 }
 
+function resolveUnpackedAsarPath(filePath: string): string {
+  const segments = filePath.split(NodePath.sep);
+  const asarIndex = segments.lastIndexOf("app.asar");
+  if (asarIndex < 0) {
+    return filePath;
+  }
+
+  segments[asarIndex] = "app.asar.unpacked";
+  const unpackedPath = segments.join(NodePath.sep);
+  return NodeFS.existsSync(unpackedPath) ? unpackedPath : filePath;
+}
+
+export function resolveBundledWindowsCopilotCliPath(
+  arch: string,
+  moduleUrl: string = import.meta.url,
+): string {
+  if (arch !== "x64" && arch !== "arm64") {
+    throw new Error(`Unsupported Windows architecture for Copilot CLI: ${arch}`);
+  }
+
+  const require = NodeModule.createRequire(moduleUrl);
+  const sdkPath = require.resolve("@github/copilot-sdk");
+  const sdkRequire = NodeModule.createRequire(sdkPath);
+  const loaderPath = sdkRequire.resolve("@github/copilot/npm-loader.js");
+  const packageRequire = NodeModule.createRequire(loaderPath);
+  return resolveUnpackedAsarPath(packageRequire.resolve(`@github/copilot-win32-${arch}`));
+}
+
 function resolveSdkCliPath(
   command: string,
   env: NodeJS.ProcessEnv | undefined,
+  runtime: CopilotSdkRuntime,
+  moduleUrl: string | undefined,
 ): string | undefined {
   if (isDefaultCopilotBinaryPath(command)) {
-    return undefined;
+    return runtime.platform === "win32"
+      ? resolveBundledWindowsCopilotCliPath(runtime.arch, moduleUrl)
+      : undefined;
   }
 
   const resolved = resolveCommandOnPath(command, env);
@@ -160,6 +193,11 @@ function resolveSdkCliPath(
     return resolved;
   }
   throw new Error(`Command not found: ${command}`);
+}
+
+export interface CopilotSdkRuntime {
+  readonly platform: NodeJS.Platform;
+  readonly arch: string;
 }
 
 export function getCopilotModelCapabilities(model: string | null | undefined): ModelCapabilities {
@@ -251,10 +289,17 @@ export function formatPremiumRequestMultiplier(
 export function buildCopilotSdkClientLaunch(input: {
   readonly settings: CopilotSettings;
   readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly runtime: CopilotSdkRuntime;
+  readonly moduleUrl?: string | undefined;
 }): {
   readonly clientOptions: CopilotClientOptions;
 } {
-  const cliPath = resolveSdkCliPath(input.settings.binaryPath, input.env);
+  const cliPath = resolveSdkCliPath(
+    input.settings.binaryPath,
+    input.env,
+    input.runtime,
+    input.moduleUrl,
+  );
 
   return {
     clientOptions: {

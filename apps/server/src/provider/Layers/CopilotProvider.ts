@@ -7,6 +7,7 @@ import {
   type ServerProviderModel,
   type ServerProviderState,
 } from "@t3tools/contracts";
+import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -191,10 +192,16 @@ const probeCopilotSdkStatus = Effect.fn("probeCopilotSdkStatus")(function* (
   environment: NodeJS.ProcessEnv,
 ) {
   const environmentAuth = parseCopilotAuthStatusFromEnvironment(environment);
+  const platform = yield* HostProcessPlatform;
+  const arch = yield* HostProcessArchitecture;
 
   const probe = Effect.tryPromise({
     try: async () => {
-      const { clientOptions } = buildCopilotSdkClientLaunch({ settings, env: environment });
+      const { clientOptions } = buildCopilotSdkClientLaunch({
+        settings,
+        env: environment,
+        runtime: { platform, arch },
+      });
       const client = new CopilotClient({
         ...clientOptions,
         logLevel: "error",

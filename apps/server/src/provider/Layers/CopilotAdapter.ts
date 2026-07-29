@@ -27,6 +27,7 @@ import {
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
 } from "@t3tools/contracts";
+import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { getModelSelectionReasoningEffort, resolveApiModelId } from "@t3tools/shared/model";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -886,6 +887,8 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
 ) {
   const serverConfig = yield* ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
+  const platform = yield* HostProcessPlatform;
+  const arch = yield* HostProcessArchitecture;
   const instanceId = options.instanceId;
   const environment = options?.environment ?? process.env;
   const nativeEventLogger =
@@ -1889,6 +1892,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       const launch = buildCopilotSdkClientLaunch({
         settings,
         env: environment,
+        runtime: { platform, arch },
       });
       const client =
         options?.createClient?.({
