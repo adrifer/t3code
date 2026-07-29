@@ -27,7 +27,6 @@ import {
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
 } from "@t3tools/contracts";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { getModelSelectionReasoningEffort, resolveApiModelId } from "@t3tools/shared/model";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -77,7 +76,7 @@ interface CopilotSdkSessionShape {
   };
   on(handler: (event: SessionEvent) => void): () => void;
   send(options: MessageOptions): Promise<string>;
-  getMessages(): Promise<ReadonlyArray<SessionEvent>>;
+  getEvents(): Promise<ReadonlyArray<SessionEvent>>;
   abort(): Promise<void>;
   disconnect(): Promise<void>;
   setModel(
@@ -608,7 +607,9 @@ function toPermissionDecision(
 
   switch (request.kind) {
     case "shell": {
-      const identifiers = request.commands.map((command) => command.identifier);
+      const identifiers = request.commands.map(
+        (command: { readonly identifier: string }) => command.identifier,
+      );
       return identifiers.length > 0
         ? {
             kind: "approve-for-session",
@@ -885,8 +886,6 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
 ) {
   const serverConfig = yield* ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
-  const platform = yield* HostProcessPlatform;
-  const arch = yield* HostProcessArchitecture;
   const instanceId = options.instanceId;
   const environment = options?.environment ?? process.env;
   const nativeEventLogger =
@@ -1583,7 +1582,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
                   id: "response",
                   header: "GitHub Copilot needs input",
                   question: event.data.question,
-                  options: (event.data.choices ?? []).map((choice) => ({
+                  options: (event.data.choices ?? []).map((choice: string) => ({
                     label: choice,
                     description: choice,
                   })),
@@ -1889,9 +1888,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       const reasoningEffort = getCopilotReasoningEffort(modelSelection);
       const launch = buildCopilotSdkClientLaunch({
         settings,
-        cwd: input.cwd,
         env: environment,
-        runtime: { platform, arch },
       });
       const client =
         options?.createClient?.({
@@ -1956,11 +1953,11 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       });
 
       const history = yield* Effect.tryPromise({
-        try: () => sdkSession.getMessages(),
+        try: () => sdkSession.getEvents(),
         catch: (cause) =>
           new ProviderAdapterRequestError({
             provider: PROVIDER,
-            method: "session/getMessages",
+            method: "session/getEvents",
             detail: toMessage(cause, "Failed to load Copilot session history."),
             cause,
           }),

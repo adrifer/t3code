@@ -10,11 +10,10 @@ import {
   type CopilotClientOptions,
   type GetAuthStatusResponse,
   type ModelInfo,
+  RuntimeConnection,
 } from "@github/copilot-sdk";
 import { createModelCapabilities, normalizeModelSlug } from "@t3tools/shared/model";
 import * as NodeFS from "node:fs";
-import * as NodeModule from "node:module";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 const COPILOT_REASONING_LEVELS = [
@@ -148,79 +147,17 @@ function isDefaultCopilotBinaryPath(binaryPath: string): boolean {
   return normalized === "copilot" || normalized === "copilot.exe" || normalized === "copilot.cmd";
 }
 
-function resolveUnpackedAsarPath(filePath: string): string {
-  const segments = filePath.split(NodePath.sep);
-  const asarIndex = segments.lastIndexOf("app.asar");
-  if (asarIndex < 0) {
-    return filePath;
-  }
-
-  segments[asarIndex] = "app.asar.unpacked";
-  const unpackedPath = segments.join(NodePath.sep);
-  return NodeFS.existsSync(unpackedPath) ? unpackedPath : filePath;
-}
-
-export interface BundledCopilotRuntime {
-  readonly platform: NodeJS.Platform;
-  readonly arch: string;
-  readonly stagingRoot?: string;
-}
-
-function stageLinuxCopilotCli(
-  loaderPath: string,
-  runtime: BundledCopilotRuntime,
+function resolveSdkCliPath(
+  command: string,
+  env: NodeJS.ProcessEnv | undefined,
 ): string | undefined {
-  if (runtime.platform !== "linux" || !["arm64", "x64"].includes(runtime.arch)) {
+  if (isDefaultCopilotBinaryPath(command)) {
     return undefined;
   }
 
-  const require = NodeModule.createRequire(loaderPath);
-  const sourcePath = resolveUnpackedAsarPath(
-    require.resolve(`@github/copilot-linux-${runtime.arch}`),
-  );
-  const sourceStat = NodeFS.statSync(sourcePath);
-  const fingerprint = `${sourceStat.size}-${Math.trunc(sourceStat.mtimeMs)}`;
-  const destinationDir = NodePath.join(
-    runtime.stagingRoot ?? NodePath.join(NodeOS.homedir(), ".cache"),
-    "t3code",
-    "copilot",
-    `${runtime.arch}-${fingerprint}`,
-  );
-  const destinationPath = NodePath.join(destinationDir, "copilot");
-
-  NodeFS.mkdirSync(destinationDir, { recursive: true, mode: 0o700 });
-  if (!NodeFS.existsSync(destinationPath)) {
-    const temporaryPath = `${destinationPath}.${process.pid}.tmp`;
-    NodeFS.copyFileSync(sourcePath, temporaryPath);
-    NodeFS.chmodSync(temporaryPath, 0o755);
-    NodeFS.renameSync(temporaryPath, destinationPath);
-  }
-  NodeFS.chmodSync(destinationPath, 0o755);
-
-  return destinationPath;
-}
-
-export function resolveBundledCopilotCliPath(
-  runtime: BundledCopilotRuntime,
-  moduleUrl: string = import.meta.url,
-): string {
-  const require = NodeModule.createRequire(moduleUrl);
-  const loaderPath = resolveUnpackedAsarPath(require.resolve("@github/copilot/npm-loader.js"));
-  return stageLinuxCopilotCli(loaderPath, runtime) ?? loaderPath;
-}
-
-function resolveSdkCliPath(
-  command: string,
-  fallbackToBundledCopilot: boolean,
-  env: NodeJS.ProcessEnv | undefined,
-  runtime: BundledCopilotRuntime,
-): string | undefined {
   const resolved = resolveCommandOnPath(command, env);
   if (resolved) {
     return resolved;
-  }
-  if (fallbackToBundledCopilot) {
-    return resolveBundledCopilotCliPath(runtime);
   }
   throw new Error(`Command not found: ${command}`);
 }
@@ -313,23 +250,15 @@ export function formatPremiumRequestMultiplier(
 
 export function buildCopilotSdkClientLaunch(input: {
   readonly settings: CopilotSettings;
-  readonly cwd?: string | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
-  readonly runtime: BundledCopilotRuntime;
 }): {
   readonly clientOptions: CopilotClientOptions;
 } {
-  const cliPath = resolveSdkCliPath(
-    input.settings.binaryPath,
-    isDefaultCopilotBinaryPath(input.settings.binaryPath),
-    input.env,
-    input.runtime,
-  );
+  const cliPath = resolveSdkCliPath(input.settings.binaryPath, input.env);
 
   return {
     clientOptions: {
-      ...(cliPath ? { cliPath } : {}),
-      ...(input.cwd ? { cwd: input.cwd } : {}),
+      ...(cliPath ? { connection: RuntimeConnection.forStdio({ path: cliPath }) } : {}),
       ...(input.env ? { env: input.env } : {}),
     },
   };

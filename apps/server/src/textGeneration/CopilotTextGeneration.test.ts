@@ -57,7 +57,7 @@ const CopilotTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(proce
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
 it.layer(CopilotTextGenerationTestLayer)("CopilotTextGeneration", (it) => {
-  it.effect("supports custom instance IDs and the bundled CLI loader", () =>
+  it.effect("supports custom instance IDs and the SDK bundled runtime", () =>
     Effect.gen(function* () {
       const instanceId = ProviderInstanceId.make("copilot-work");
       const textGeneration = yield* makeCopilotTextGeneration(
@@ -75,9 +75,7 @@ it.layer(CopilotTextGenerationTestLayer)("CopilotTextGeneration", (it) => {
       });
 
       expect(generated.subject).toBe("Add Copilot support");
-      expect(copilotSdk.clientOptions.at(-1)?.cliPath).toMatch(
-        /t3code[/\\]copilot[/\\]x64-[^/\\]+[/\\]copilot$/,
-      );
+      expect(copilotSdk.clientOptions.at(-1)?.connection).toBeUndefined();
       expect(copilotSdk.createSession).toHaveBeenCalledWith(
         expect.objectContaining({
           model: "gpt-5.1-codex",

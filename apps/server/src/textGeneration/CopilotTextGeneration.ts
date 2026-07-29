@@ -10,7 +10,6 @@ import {
   type ProviderInstanceId,
   TextGenerationError,
 } from "@t3tools/contracts";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { getModelSelectionReasoningEffort, resolveApiModelId } from "@t3tools/shared/model";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 
@@ -55,8 +54,6 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   const serverConfig = yield* Effect.service(ServerConfig);
-  const platform = yield* HostProcessPlatform;
-  const arch = yield* HostProcessArchitecture;
 
   const materializeImageAttachmentPaths = (
     attachments: ReadonlyArray<ChatAttachment> | undefined,
@@ -131,9 +128,7 @@ ${schemaJson}
       try: async () => {
         const { clientOptions } = buildCopilotSdkClientLaunch({
           settings: copilotSettings,
-          cwd,
           env: environment,
-          runtime: { platform, arch },
         });
         const client = new CopilotClient({ ...clientOptions, logLevel: "error" });
         let session: Awaited<ReturnType<CopilotClient["createSession"]>> | undefined;
