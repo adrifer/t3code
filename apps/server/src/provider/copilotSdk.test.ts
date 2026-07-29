@@ -16,9 +16,12 @@ describe("copilotSdk", () => {
     const { clientOptions } = buildCopilotSdkClientLaunch({
       settings: decodeCopilotSettings({ binaryPath: "copilot" }),
       env: { PATH: "" },
+      runtime: { platform: "linux", arch: "x64" },
     });
 
-    expect(clientOptions.cliPath).toMatch(/@github[/\\]copilot[/\\]npm-loader\.js$/);
+    expect(clientOptions.cliPath).toContain(
+      `${NodePath.sep}.cache${NodePath.sep}t3code${NodePath.sep}copilot${NodePath.sep}`,
+    );
   });
 
   it("uses the unpacked bundled CLI loader in packaged Electron apps", () => {
@@ -46,9 +49,88 @@ describe("copilotSdk", () => {
         JSON.stringify({ name: "@github/copilot" }),
       );
 
-      expect(resolveBundledCopilotCliPath(NodeURL.pathToFileURL(packedModule).href)).toBe(
-        unpackedLoader,
+      expect(
+        resolveBundledCopilotCliPath(
+          {
+            platform: "win32",
+            arch: "x64",
+            stagingRoot: root,
+          },
+          NodeURL.pathToFileURL(packedModule).href,
+        ),
+      ).toBe(unpackedLoader);
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("copies the Linux CLI to a native filesystem before launching it", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-copilot-linux-"));
+    try {
+      const modulePath = NodePath.join(root, "app/apps/server/dist/bin.mjs");
+      const packageRoot = NodePath.join(root, "app/node_modules/@github");
+      const loaderPath = NodePath.join(packageRoot, "copilot/npm-loader.js");
+      const nativeCliPath = NodePath.join(packageRoot, "copilot-linux-x64/copilot");
+      NodeFS.mkdirSync(NodePath.dirname(modulePath), { recursive: true });
+      NodeFS.mkdirSync(NodePath.dirname(loaderPath), { recursive: true });
+      NodeFS.mkdirSync(NodePath.dirname(nativeCliPath), { recursive: true });
+      NodeFS.writeFileSync(modulePath, "");
+      NodeFS.writeFileSync(loaderPath, "");
+      NodeFS.writeFileSync(nativeCliPath, "linux copilot");
+      NodeFS.writeFileSync(
+        NodePath.join(NodePath.dirname(loaderPath), "package.json"),
+        JSON.stringify({ name: "@github/copilot" }),
       );
+      NodeFS.writeFileSync(
+        NodePath.join(NodePath.dirname(nativeCliPath), "package.json"),
+        JSON.stringify({
+          name: "@github/copilot-linux-x64",
+          exports: { ".": "./copilot" },
+        }),
+      );
+
+      const resolved = resolveBundledCopilotCliPath(
+        {
+          platform: "linux",
+          arch: "x64",
+          stagingRoot: NodePath.join(root, "tmp"),
+        },
+        NodeURL.pathToFileURL(modulePath).href,
+      );
+
+      expect(resolved).not.toBe(nativeCliPath);
+      expect(NodeFS.readFileSync(resolved, "utf8")).toBe("linux copilot");
+      expect(NodeFS.statSync(resolved).mode & 0o777).toBe(0o755);
+      expect(resolved).toContain(`${NodePath.sep}t3code${NodePath.sep}copilot${NodePath.sep}`);
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the unpacked loader for unsupported Linux architectures", () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-copilot-linux-arch-"));
+    try {
+      const modulePath = NodePath.join(root, "app/apps/server/dist/bin.mjs");
+      const loaderPath = NodePath.join(root, "app/node_modules/@github/copilot/npm-loader.js");
+      NodeFS.mkdirSync(NodePath.dirname(modulePath), { recursive: true });
+      NodeFS.mkdirSync(NodePath.dirname(loaderPath), { recursive: true });
+      NodeFS.writeFileSync(modulePath, "");
+      NodeFS.writeFileSync(loaderPath, "");
+      NodeFS.writeFileSync(
+        NodePath.join(NodePath.dirname(loaderPath), "package.json"),
+        JSON.stringify({ name: "@github/copilot" }),
+      );
+
+      expect(
+        resolveBundledCopilotCliPath(
+          {
+            platform: "linux",
+            arch: "riscv64",
+            stagingRoot: NodePath.join(root, "tmp"),
+          },
+          NodeURL.pathToFileURL(modulePath).href,
+        ),
+      ).toBe(loaderPath);
     } finally {
       NodeFS.rmSync(root, { recursive: true, force: true });
     }
@@ -69,6 +151,7 @@ describe("copilotSdk", () => {
         env: {
           PATH: [missingBin, installedBin].join(NodePath.delimiter),
         },
+        runtime: { platform: "linux", arch: "x64" },
       });
 
       expect(clientOptions.cliPath).toBe(installedCopilot);

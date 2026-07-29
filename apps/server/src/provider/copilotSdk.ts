@@ -14,6 +14,7 @@ import {
 import { createModelCapabilities, normalizeModelSlug } from "@t3tools/shared/model";
 import * as NodeFS from "node:fs";
 import * as NodeModule from "node:module";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 const COPILOT_REASONING_LEVELS = [
@@ -159,23 +160,67 @@ function resolveUnpackedAsarPath(filePath: string): string {
   return NodeFS.existsSync(unpackedPath) ? unpackedPath : filePath;
 }
 
-export function resolveBundledCopilotCliPath(moduleUrl: string = import.meta.url): string {
+export interface BundledCopilotRuntime {
+  readonly platform: NodeJS.Platform;
+  readonly arch: string;
+  readonly stagingRoot?: string;
+}
+
+function stageLinuxCopilotCli(
+  loaderPath: string,
+  runtime: BundledCopilotRuntime,
+): string | undefined {
+  if (runtime.platform !== "linux" || !["arm64", "x64"].includes(runtime.arch)) {
+    return undefined;
+  }
+
+  const require = NodeModule.createRequire(loaderPath);
+  const sourcePath = resolveUnpackedAsarPath(
+    require.resolve(`@github/copilot-linux-${runtime.arch}`),
+  );
+  const sourceStat = NodeFS.statSync(sourcePath);
+  const fingerprint = `${sourceStat.size}-${Math.trunc(sourceStat.mtimeMs)}`;
+  const destinationDir = NodePath.join(
+    runtime.stagingRoot ?? NodePath.join(NodeOS.homedir(), ".cache"),
+    "t3code",
+    "copilot",
+    `${runtime.arch}-${fingerprint}`,
+  );
+  const destinationPath = NodePath.join(destinationDir, "copilot");
+
+  NodeFS.mkdirSync(destinationDir, { recursive: true, mode: 0o700 });
+  if (!NodeFS.existsSync(destinationPath)) {
+    const temporaryPath = `${destinationPath}.${process.pid}.tmp`;
+    NodeFS.copyFileSync(sourcePath, temporaryPath);
+    NodeFS.chmodSync(temporaryPath, 0o755);
+    NodeFS.renameSync(temporaryPath, destinationPath);
+  }
+  NodeFS.chmodSync(destinationPath, 0o755);
+
+  return destinationPath;
+}
+
+export function resolveBundledCopilotCliPath(
+  runtime: BundledCopilotRuntime,
+  moduleUrl: string = import.meta.url,
+): string {
   const require = NodeModule.createRequire(moduleUrl);
-  const cliPath = require.resolve("@github/copilot/npm-loader.js");
-  return resolveUnpackedAsarPath(cliPath);
+  const loaderPath = resolveUnpackedAsarPath(require.resolve("@github/copilot/npm-loader.js"));
+  return stageLinuxCopilotCli(loaderPath, runtime) ?? loaderPath;
 }
 
 function resolveSdkCliPath(
   command: string,
   fallbackToBundledCopilot: boolean,
   env: NodeJS.ProcessEnv | undefined,
+  runtime: BundledCopilotRuntime,
 ): string | undefined {
   const resolved = resolveCommandOnPath(command, env);
   if (resolved) {
     return resolved;
   }
   if (fallbackToBundledCopilot) {
-    return resolveBundledCopilotCliPath();
+    return resolveBundledCopilotCliPath(runtime);
   }
   throw new Error(`Command not found: ${command}`);
 }
@@ -270,6 +315,7 @@ export function buildCopilotSdkClientLaunch(input: {
   readonly settings: CopilotSettings;
   readonly cwd?: string | undefined;
   readonly env?: NodeJS.ProcessEnv | undefined;
+  readonly runtime: BundledCopilotRuntime;
 }): {
   readonly clientOptions: CopilotClientOptions;
 } {
@@ -277,6 +323,7 @@ export function buildCopilotSdkClientLaunch(input: {
     input.settings.binaryPath,
     isDefaultCopilotBinaryPath(input.settings.binaryPath),
     input.env,
+    input.runtime,
   );
 
   return {

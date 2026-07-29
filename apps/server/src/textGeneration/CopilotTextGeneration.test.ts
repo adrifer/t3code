@@ -76,7 +76,7 @@ it.layer(CopilotTextGenerationTestLayer)("CopilotTextGeneration", (it) => {
 
       expect(generated.subject).toBe("Add Copilot support");
       expect(copilotSdk.clientOptions.at(-1)?.cliPath).toMatch(
-        /@github[/\\]copilot[/\\]npm-loader\.js$/,
+        /t3code[/\\]copilot[/\\]x64-[^/\\]+[/\\]copilot$/,
       );
       expect(copilotSdk.createSession).toHaveBeenCalledWith(
         expect.objectContaining({
