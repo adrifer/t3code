@@ -11,6 +11,23 @@ import {
 } from "@t3tools/contracts";
 
 const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make("codex");
+const COPILOT_DRIVER_KIND = ProviderDriverKind.make("copilot");
+
+const COPILOT_API_MODEL_IDS: Readonly<Record<string, string>> = {
+  "claude-fable-5": "claude-fable-5",
+  "claude-sonnet-5": "claude-sonnet-5",
+  "claude-sonnet-4-6": "claude-sonnet-4.6",
+  "claude-sonnet-4-5": "claude-sonnet-4.5",
+  "claude-sonnet-4": "claude-sonnet-4",
+  "claude-haiku-4-5": "claude-haiku-4.5",
+  "claude-opus-5": "claude-opus-5",
+  "claude-opus-4-8": "claude-opus-4.8",
+  "claude-opus-4-8-fast": "claude-opus-4.8-fast",
+  "claude-opus-4-7": "claude-opus-4.7",
+  "claude-opus-4-6": "claude-opus-4.6",
+  "claude-opus-4-6-fast": "claude-opus-4.6-fast",
+  "claude-opus-4-5": "claude-opus-4.5",
+};
 
 export interface SelectableModelOption {
   slug: string;
@@ -68,6 +85,12 @@ export function getModelSelectionStringOptionValue(
   id: string,
 ): string | undefined {
   return getProviderOptionStringSelectionValue(modelSelection?.options, id);
+}
+
+export function getModelSelectionReasoningEffort(
+  modelSelection: ModelSelection | null | undefined,
+): string | undefined {
+  return getModelSelectionStringOptionValue(modelSelection, "reasoningEffort");
 }
 
 export function getModelSelectionBooleanOptionValue(
@@ -329,6 +352,16 @@ export function createModelSelection(
     model,
   };
   return selections.length > 0 ? { ...base, options: selections } : base;
+}
+
+export function resolveApiModelId(
+  modelSelection: ModelSelection,
+  driverKind?: ProviderDriverKind | null | undefined,
+): string {
+  if ((driverKind ?? modelSelection.instanceId) === COPILOT_DRIVER_KIND) {
+    return COPILOT_API_MODEL_IDS[modelSelection.model] ?? modelSelection.model;
+  }
+  return modelSelection.model;
 }
 
 /**

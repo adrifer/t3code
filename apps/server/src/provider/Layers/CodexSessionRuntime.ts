@@ -346,7 +346,7 @@ function buildCodexCollaborationMode(input: {
   const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
   const reasoningEffort = input.effort ?? "medium";
   return {
-    mode: input.interactionMode,
+    mode: input.interactionMode === "autopilot" ? "default" : input.interactionMode,
     settings: {
       model,
       reasoning_effort: reasoningEffort,

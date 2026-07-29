@@ -73,6 +73,7 @@ import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
+import { normalizeInteractionModeForProvider } from "../interactionModes";
 import {
   derivePendingApprovals,
   derivePendingUserInputs,
@@ -4531,6 +4532,19 @@ function ChatViewContent(props: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
+      if (
+        normalizeInteractionModeForProvider(ctxSelectedProvider, standaloneSlashCommand) !==
+        standaloneSlashCommand
+      ) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Autopilot is unavailable",
+            description: "Select a GitHub Copilot provider to use autopilot mode.",
+          }),
+        );
+        return;
+      }
       handleInteractionModeChange(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);

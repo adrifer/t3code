@@ -22,6 +22,15 @@ describe("ProviderSettingsForm helpers", () => {
     ]);
   });
 
+  it("includes Copilot as a configurable provider driver", () => {
+    const copilot = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("copilot")];
+
+    expect(copilot?.label).toBe("GitHub Copilot");
+    expect(deriveProviderSettingsFields(copilot!).map((field) => field.key)).toEqual([
+      "binaryPath",
+    ]);
+  });
+
   it("sources labels and descriptions from schema annotations", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();

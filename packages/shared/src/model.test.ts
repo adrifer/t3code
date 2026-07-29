@@ -12,6 +12,7 @@ import {
   getProviderOptionStringSelectionValue,
   normalizeCustomModelSlug,
   normalizeModelSlug,
+  resolveApiModelId,
 } from "./model.ts";
 
 const codexCaps: ModelCapabilities = createModelCapabilities({
@@ -153,5 +154,22 @@ describe("model slug normalization", () => {
 
     expect(normalizeModelSlug("opus", claude)).toBe("claude-opus-5");
     expect(normalizeCustomModelSlug(" opus ")).toBe("opus");
+  });
+
+  it("maps current normalized Copilot Claude slugs to API model IDs", () => {
+    const copilot = ProviderDriverKind.make("copilot");
+
+    expect(
+      resolveApiModelId(
+        createModelSelection(ProviderInstanceId.make("copilot"), "claude-opus-4-8-fast"),
+        copilot,
+      ),
+    ).toBe("claude-opus-4.8-fast");
+    expect(
+      resolveApiModelId(
+        createModelSelection(ProviderInstanceId.make("copilot"), "claude-sonnet-5"),
+        copilot,
+      ),
+    ).toBe("claude-sonnet-5");
   });
 });
