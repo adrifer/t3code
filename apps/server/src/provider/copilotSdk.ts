@@ -13,6 +13,7 @@ import {
 } from "@github/copilot-sdk";
 import { createModelCapabilities, normalizeModelSlug } from "@t3tools/shared/model";
 import * as NodeFS from "node:fs";
+import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
 
 const COPILOT_REASONING_LEVELS = [
@@ -146,6 +147,24 @@ function isDefaultCopilotBinaryPath(binaryPath: string): boolean {
   return normalized === "copilot" || normalized === "copilot.exe" || normalized === "copilot.cmd";
 }
 
+function resolveUnpackedAsarPath(filePath: string): string {
+  const segments = filePath.split(NodePath.sep);
+  const asarIndex = segments.lastIndexOf("app.asar");
+  if (asarIndex < 0) {
+    return filePath;
+  }
+
+  segments[asarIndex] = "app.asar.unpacked";
+  const unpackedPath = segments.join(NodePath.sep);
+  return NodeFS.existsSync(unpackedPath) ? unpackedPath : filePath;
+}
+
+export function resolveBundledCopilotCliPath(moduleUrl: string = import.meta.url): string {
+  const require = NodeModule.createRequire(moduleUrl);
+  const cliPath = require.resolve("@github/copilot/npm-loader.js");
+  return resolveUnpackedAsarPath(cliPath);
+}
+
 function resolveSdkCliPath(
   command: string,
   fallbackToBundledCopilot: boolean,
@@ -156,7 +175,7 @@ function resolveSdkCliPath(
     return resolved;
   }
   if (fallbackToBundledCopilot) {
-    return undefined;
+    return resolveBundledCopilotCliPath();
   }
   throw new Error(`Command not found: ${command}`);
 }
