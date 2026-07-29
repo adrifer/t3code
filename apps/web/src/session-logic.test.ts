@@ -178,6 +178,45 @@ describe("derivePendingApprovals", () => {
 });
 
 describe("derivePendingUserInputs", () => {
+  it("keeps freeform-only prompts with no options", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "user-input-freeform",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: {
+          requestId: "req-user-input-freeform",
+          questions: [
+            {
+              id: "response",
+              header: "GitHub Copilot needs input",
+              question: "What should I call this project?",
+              options: [],
+            },
+          ],
+        },
+      }),
+    ];
+
+    expect(derivePendingUserInputs(activities)).toEqual([
+      {
+        requestId: "req-user-input-freeform",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        questions: [
+          {
+            id: "response",
+            header: "GitHub Copilot needs input",
+            question: "What should I call this project?",
+            options: [],
+            multiSelect: false,
+          },
+        ],
+      },
+    ]);
+  });
+
   it("tracks open structured prompts and removes resolved ones", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
